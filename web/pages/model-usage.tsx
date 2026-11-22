@@ -310,8 +310,8 @@ export function ModelUsagePage({
                           width: `${Math.min(100, (data.budget.utilizationRate ?? 0) * 100)}%`,
                           background:
                             (data.budget.utilizationRate ?? 0) >= 0.85
-                              ? "#ef4444"
-                              : "#3b82f6",
+                              ? "#d93f3b"
+                              : "#e56934",
                         }}
                       />
                     </div>

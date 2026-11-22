@@ -1201,29 +1201,46 @@ when implementing or reviewing a change.
   an SVG icon in place of that symbol everywhere it appears.
 - **Exceptions:** None recorded.
 
-### Admin UI follows TelegramUI's visual language
+### Admin UI follows TelegramUI's grouped structure with Telo's warm logo styling
 
-- **Preference:** Use TelegramUI as a design reference for Telo's own UI:
-  system typography, a soft gray canvas, white grouped sections, blue actions,
-  quiet separators, rounded controls, compact status badges, and comfortable
-  touch targets. Keep these patterns consistent across the admin panel and setup.
-  Maintain the local CSS tokens and components rather than importing TelegramUI.
-- **Scope:** Telo web admin and setup surfaces. This does not turn the site
-  into a Telegram Mini App or imply that it reads Telegram client theme values.
+- **Preference:** Keep the calm grouped-surface layout informed by TelegramUI
+  (system typography, grouped white/elevated sections, quiet separators, rounded
+  controls, compact status badges, comfortable 44px touch targets), while
+  aligning the palette, depth and brand accents to Telo's sunny origami paper
+  boat logo: a warm sunlit ivory canvas (`#faf7f2`) and warm espresso dark mode
+  (`#151210`), elevated surfaces with layered warm shadows and hairline borders,
+  sunlit terracotta-tangerine primary actions (`#c94d1e` light / `#f69b54` dark)
+  with warm apricot secondary fills and subtle peach borders, and a warm
+  roasted-espresso/sunlit-amber split hero panel on sign-in and setup. Keep
+  local CSS tokens and components rather than importing TelegramUI.
+- **Scope:** Telo web admin, sign-in and setup surfaces, in light and dark
+  themes at desktop and mobile widths. This does not restyle Telegram Mini Apps,
+  which continue to follow official Telegram theme values.
 - **Source:** 2026-09-28 — user linked [TelegramUI](https://github.com/telegram-mini-apps-dev/TelegramUI)
   and asked to use its design as a reference without using the package directly.
   Reference revision: `00c87ea84f34f2869ce9d725c453349b0d1c91bc`.
-- **Exceptions:** Preserve the established minimal green Telo mark and the
-  existing green setup illustration; they provide product identity within the
-  updated interface. Existing action labels, accessible icon controls and
-  permission-sensitive flows remain governed by their specific rules below.
+- **Source update:** 2026-11-22 — after introducing the sunny origami paper boat
+  Telo logo and warm README banner, the user requested updating the admin panel
+  UI style based on the new logo: preserving the current overall structure while
+  making the finish more refined and aligned with the logo's visual language.
+- **Acceptance:** Verify light and dark themes at desktop and mobile widths,
+  accessible contrast on primary/secondary actions and badges, preserved card
+  spacing and touch targets, reduced-motion and forced-colors support, and
+  cohesive sign-in/setup hero artwork.
+- **Exceptions:** Existing action labels, modal editors, accessible icon
+  controls, permission-sensitive flows and Telegram Mini Apps remain governed by
+  their specific rules.
 
-### Logo stays minimal
+### Logo uses Telo's sunny origami paper boat emblem
 
-- **Preference:** Use one clear vector mark with simple geometry and the
-  existing restrained green palette. Avoid gradients, shadows and extra symbols.
+- **Preference:** Use the circular sunny golden-orange origami paper boat emblem
+  (`telo-mark.svg`) as Telo's brand mark, favicon, sidebar lockup, mobile header
+  mark and auth hub identity.
 - **Scope:** Telo logo, favicon and product brand treatment.
-- **Source:** 2026-09-26 — user asked for a logo and specified a super clean design.
+- **Source:** 2026-09-26 — user asked for a minimal green mark.
+- **Source update:** 2026-11-21 / 2026-11-22 — superseded by the Telo rename and
+  sunny origami paper boat logo design (`9df3aaa`), with admin UI tokens and
+  split-hero styling aligned to the new mark.
 - **Exceptions:** None recorded.
 
 ### Product branding is independent of connected GitHub accounts

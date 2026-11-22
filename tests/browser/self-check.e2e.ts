@@ -98,7 +98,7 @@ for (const width of [1280, 390]) {
     expect(bounds?.x).toBeGreaterThan(width - 100);
     expect(bounds?.height).toBeGreaterThanOrEqual(44);
     await launcher.hover();
-    await expect(launcher).toHaveCSS("background-color", "rgb(16, 91, 147)");
+    await expect(launcher).toHaveCSS("background-color", "rgb(174, 62, 21)");
     await launcher.click();
     await expect(popup(page)).toBeVisible();
     await expect(popup(page)).toContainText("Acme team");

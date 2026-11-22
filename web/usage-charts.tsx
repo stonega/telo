@@ -33,31 +33,31 @@ export function formatLatency(ms: number | null | undefined): string {
 }
 
 export const SOURCE_COLORS: Record<UsageSourceKind, string> = {
-  chat: "#3b82f6",
-  workflow: "#8b5cf6",
-  mission: "#ec4899",
-  compaction: "#f59e0b",
-  followup: "#06b6d4",
-  research_subagent: "#14b8a6",
-  memory_extract: "#84cc16",
-  memory_consolidate: "#22c55e",
-  skill_extract: "#a855f7",
-  self_check: "#64748b",
-  coding_task: "#f97316",
-  coding_conversation: "#fb923c",
-  review_bot: "#6366f1",
+  chat: "#e56934",
+  workflow: "#3b82f6",
+  mission: "#db4f7d",
+  compaction: "#ea8a3e",
+  followup: "#0e9fa8",
+  research_subagent: "#149c7e",
+  memory_extract: "#78a828",
+  memory_consolidate: "#1f9a5a",
+  skill_extract: "#a259d9",
+  self_check: "#877a70",
+  coding_task: "#d97706",
+  coding_conversation: "#f59e0b",
+  review_bot: "#7c5cdb",
 };
 
 export const TOKEN_COLORS = {
-  input: "#3b82f6",
-  cacheRead: "#10b981",
-  cacheWrite: "#06b6d4",
-  output: "#f59e0b",
-  reasoning: "#8b5cf6",
+  input: "#e56934",
+  cacheRead: "#1d9a6c",
+  cacheWrite: "#0e9fa8",
+  output: "#f2a33a",
+  reasoning: "#8b63d9",
 };
 
 export function sourceColor(kind: string): string {
-  return SOURCE_COLORS[kind as UsageSourceKind] ?? "#64748b";
+  return SOURCE_COLORS[kind as UsageSourceKind] ?? "#877a70";
 }
 
 function niceMax(raw: number): number {
@@ -305,10 +305,10 @@ export function SpendAndCacheChart({
     <div className="mu-chart-wrap">
       <div className="mu-chart-legend">
         <span className="mu-legend-item">
-          <i className="mu-dot" style={{ background: "#6366f1" }} /> Spend (USD)
+          <i className="mu-dot" style={{ background: "#e56934" }} /> Spend (USD)
         </span>
         <span className="mu-legend-item">
-          <i className="mu-dot" style={{ background: "#10b981" }} /> Cache hit
+          <i className="mu-dot" style={{ background: "#1d9a6c" }} /> Cache hit
           rate (%)
         </span>
       </div>
@@ -389,9 +389,9 @@ export function SpendAndCacheChart({
                   y={pad.top + plotH - barH}
                   width={barW}
                   height={barH}
-                  fill="#6366f1"
-                  fillOpacity={isHovered ? 0.95 : 0.72}
-                  rx={2}
+                  fill="#e56934"
+                  fillOpacity={isHovered ? 0.96 : 0.78}
+                  rx={3}
                 />
               )}
               {(index % labelEvery === 0 || index === series.length - 1) && (
@@ -411,7 +411,7 @@ export function SpendAndCacheChart({
         {cachePoints.length > 1 && (
           <polyline
             fill="none"
-            stroke="#10b981"
+            stroke="#1d9a6c"
             strokeWidth="2.2"
             strokeLinejoin="round"
             strokeLinecap="round"
@@ -425,7 +425,7 @@ export function SpendAndCacheChart({
             cx={pt.x}
             cy={pt.y}
             r={activeIndex === pt.index ? 4.5 : 3}
-            fill="#10b981"
+            fill="#1d9a6c"
             stroke="var(--ui-surface)"
             strokeWidth="1.5"
             pointerEvents="none"
@@ -689,7 +689,7 @@ export function ActorBreakdownBars({
             <div className="mu-bar-track" aria-hidden="true">
               <div
                 className="mu-bar-fill"
-                style={{ width: `${widthPct}%`, background: "#3b82f6" }}
+                style={{ width: `${widthPct}%`, background: "#e56934" }}
               />
             </div>
             <div className="mu-model-foot muted">
@@ -751,7 +751,7 @@ export function TokenCompositionBar({
           {
             label: "Total-only (legacy)",
             value: unattributed,
-            color: "#94a3b8",
+            color: "#a3978d",
           },
         ]
       : []),

@@ -47,7 +47,7 @@ for (const width of [1280, 390]) {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await expect(page.locator("aside")).toHaveCSS(
       "background-color",
-      "rgb(25, 33, 43)",
+      "rgb(30, 26, 23)",
     );
     await page.screenshot({
       path: test.info().outputPath("account-dark.png"),
@@ -106,7 +106,7 @@ test("saved theme applies before the application bundle loads", async ({
   await expect(page.locator("html")).toHaveCSS("color-scheme", "dark");
   await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute(
     "content",
-    "#11171e",
+    "#151210",
   );
 });
 

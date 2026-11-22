@@ -41,7 +41,16 @@ export function Sidebar({
           aria-expanded={open}
           onClick={() => setOpen(true)}
         />
-        <span className="mobile-brand">Telo</span>
+        <span className="mobile-brand">
+          <img
+            className="mobile-brand-mark"
+            src="/assets/telo-mark.svg"
+            width="26"
+            height="26"
+            alt=""
+          />
+          Telo
+        </span>
       </header>
       {open && (
         <Modal
