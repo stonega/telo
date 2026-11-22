@@ -115,7 +115,7 @@ export function cloudflareExtension(
         name: "propose_cloudflare_action",
         label: "Propose Cloudflare action",
         description:
-          "Draft an exact DNS change, cache purge, zone setting change or Worker route create/update/delete for a configured zone. Only workspace owners/admins in private interactive requests. Creates an actor-bound approval; does not execute the change. Inspect zone_settings or worker_routes before changing them. Routes need explicit pattern and scriptName (null means bypass). For DNS supply a supported complete record. For purge specify files OR purgeEverything=true.",
+          "Draft an exact DNS change, cache purge, zone setting change or Worker route create/update/delete for a configured zone. Only workspace owners/admins in private interactive requests. Creates an actor-bound approval (auto-approved for non-destructive writes under Check-in/Full Auto, and for destructive deletes under Full Auto). Inspect zone_settings or worker_routes before changing them. Routes need explicit pattern and scriptName (null means bypass). For DNS supply a supported complete record. For purge specify files OR purgeEverything=true.",
         parameters: Type.Object(
           {
             action: Type.Union(

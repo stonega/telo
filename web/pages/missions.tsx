@@ -37,9 +37,16 @@ interface MissionListItem {
 }
 
 function autonomyLabel(mode: AutonomyMode | RepositoryAutonomyOverride) {
+  if (mode === "full_auto") return "Full Auto";
   if (mode === "check_in") return "Check-in";
   if (mode === "supervised") return "Supervised";
   return "Inherit workspace default";
+}
+
+function autonomyPillClass(mode: AutonomyMode) {
+  if (mode === "full_auto") return "pill danger";
+  if (mode === "check_in") return "pill good";
+  return "pill";
 }
 
 function missionTerminal(status: MissionStatus) {
@@ -61,6 +68,7 @@ export function MissionsPage({ id }: { id: string }) {
   // Autonomy edit modals
   const [editingDefault, setEditingDefault] = useState(false);
   const [defaultDraft, setDefaultDraft] = useState<AutonomyMode>("supervised");
+  const [confirmDefaultFullAuto, setConfirmDefaultFullAuto] = useState(false);
   const [defaultError, setDefaultError] = useState("");
   const [savingDefault, setSavingDefault] = useState(false);
 
@@ -71,6 +79,7 @@ export function MissionsPage({ id }: { id: string }) {
   }>();
   const [repoDraft, setRepoDraft] =
     useState<RepositoryAutonomyOverride>("inherit");
+  const [confirmRepoFullAuto, setConfirmRepoFullAuto] = useState(false);
   const [repoError, setRepoError] = useState("");
   const [savingRepo, setSavingRepo] = useState(false);
 
@@ -114,9 +123,7 @@ export function MissionsPage({ id }: { id: string }) {
           <div className="row">
             <h2>Autonomy policy</h2>
             {autonomy.data ? (
-              <span
-                className={`pill${autonomy.data.defaultMode === "check_in" ? " good" : ""}`}
-              >
+              <span className={autonomyPillClass(autonomy.data.defaultMode)}>
                 {autonomyLabel(autonomy.data.defaultMode)}
               </span>
             ) : autonomy.loading ? (
@@ -132,6 +139,7 @@ export function MissionsPage({ id }: { id: string }) {
               type="button"
               onClick={() => {
                 setDefaultDraft(autonomy.data?.defaultMode ?? "supervised");
+                setConfirmDefaultFullAuto(false);
                 setDefaultError("");
                 setEditingDefault(true);
               }}
@@ -155,10 +163,10 @@ export function MissionsPage({ id }: { id: string }) {
             <dt>Routine non-destructive writes</dt>
             <dd>
               {autonomy.data ? (
-                autonomy.data.defaultMode === "check_in" ? (
-                  "Automatic with audit trail"
-                ) : (
+                autonomy.data.defaultMode === "supervised" ? (
                   "Human approval required"
+                ) : (
+                  "Automatic with audit trail"
                 )
               ) : autonomy.loading ? (
                 <Skeleton width="12em" />
@@ -169,7 +177,19 @@ export function MissionsPage({ id }: { id: string }) {
           </div>
           <div>
             <dt>High-impact actions (L3)</dt>
-            <dd>Mandatory human approval (immutable)</dd>
+            <dd>
+              {autonomy.data ? (
+                autonomy.data.defaultMode === "full_auto" ? (
+                  "Automatic with audit trail (admin changes gated)"
+                ) : (
+                  "Human approval required"
+                )
+              ) : autonomy.loading ? (
+                <Skeleton width="14em" />
+              ) : (
+                "Unavailable"
+              )}
+            </dd>
           </div>
         </dl>
         {autonomy.data && autonomy.data.repositories.length > 0 && (
@@ -189,9 +209,7 @@ export function MissionsPage({ id }: { id: string }) {
                     <td>{repo.full_name}</td>
                     <td>{autonomyLabel(repo.override)}</td>
                     <td>
-                      <span
-                        className={`pill${repo.effectiveMode === "check_in" ? " good" : ""}`}
-                      >
+                      <span className={autonomyPillClass(repo.effectiveMode)}>
                         {autonomyLabel(repo.effectiveMode)}
                       </span>
                     </td>
@@ -207,6 +225,7 @@ export function MissionsPage({ id }: { id: string }) {
                             override: repo.override,
                           });
                           setRepoDraft(repo.override);
+                          setConfirmRepoFullAuto(false);
                           setRepoError("");
                         }}
                       />
@@ -451,144 +470,232 @@ export function MissionsPage({ id }: { id: string }) {
       </section>
 
       {/* Edit Workspace Default Autonomy Modal */}
-      {editingDefault && autonomy.data && (
-        <Modal
-          title="Edit workspace autonomy policy"
-          busy={savingDefault}
-          onClose={() => setEditingDefault(false)}
-        >
-          <form onSubmit={(event) => event.preventDefault()}>
-            <div className="field">
-              <label htmlFor="autonomy-default-mode">
-                Workspace default mode
-              </label>
-              <Select
-                id="autonomy-default-mode"
-                value={defaultDraft}
-                disabled={savingDefault}
-                onChange={(event) => {
-                  setDefaultDraft(event.target.value as AutonomyMode);
-                  setDefaultError("");
-                }}
-              >
-                <option value="supervised">
-                  Supervised — require approval for external writes
-                </option>
-                <option value="check_in">
-                  Check-in — automate routine non-destructive writes; gate L3
-                </option>
-              </Select>
-              <small>
-                High-impact actions (merging/closing PRs, publishing releases or
-                tags, deleting resources, and changing permissions) always
-                require human approval.
-              </small>
-            </div>
-            {defaultError && <Notice error>{defaultError}</Notice>}
-            <ModalActions>
-              <Action
-                type="submit"
-                loading={savingDefault}
-                onError={setDefaultError}
-                onClick={async () => {
-                  setSavingDefault(true);
-                  setDefaultError("");
-                  try {
-                    await api(`/api/admin/workspaces/${id}/autonomy`, "PATCH", {
-                      revision: autonomy.data?.revision ?? 0,
-                      defaultMode: defaultDraft,
-                    });
-                    setEditingDefault(false);
-                    notify("Autonomy policy saved.");
-                    autonomy.reload();
-                  } catch (error) {
-                    setDefaultError(
-                      error instanceof Error
-                        ? error.message
-                        : "Unable to save autonomy policy.",
-                    );
-                  } finally {
-                    setSavingDefault(false);
-                  }
-                }}
-              >
-                Save policy
-              </Action>
-            </ModalActions>
-          </form>
-        </Modal>
-      )}
+      {editingDefault &&
+        autonomy.data &&
+        (() => {
+          const needsDefaultFullAutoConfirm =
+            defaultDraft === "full_auto" &&
+            autonomy.data.defaultMode !== "full_auto";
+          return (
+            <Modal
+              title="Edit workspace autonomy policy"
+              busy={savingDefault}
+              onClose={() => setEditingDefault(false)}
+            >
+              <form onSubmit={(event) => event.preventDefault()}>
+                <div className="field">
+                  <label htmlFor="autonomy-default-mode">
+                    Workspace default mode
+                  </label>
+                  <Select
+                    id="autonomy-default-mode"
+                    value={defaultDraft}
+                    disabled={savingDefault}
+                    onChange={(event) => {
+                      const next = event.target.value as AutonomyMode;
+                      setDefaultDraft(next);
+                      if (next !== "full_auto")
+                        setConfirmDefaultFullAuto(false);
+                      setDefaultError("");
+                    }}
+                  >
+                    <option value="supervised">
+                      Supervised — require approval for external writes
+                    </option>
+                    <option value="check_in">
+                      Check-in — automate routine non-destructive writes; gate
+                      L3
+                    </option>
+                    <option value="full_auto">
+                      Full Auto — automate routine writes and L3 actions
+                    </option>
+                  </Select>
+                  <small>
+                    {defaultDraft === "full_auto"
+                      ? "Workspace deletion and permission or autonomy changes remain restricted to workspace admins."
+                      : "High-impact actions (merging/closing PRs, creating repositories, publishing releases or tags, and deleting resources) require human approval unless Full Auto is enabled."}
+                  </small>
+                </div>
+                {defaultDraft === "full_auto" && (
+                  <div className="autonomy-danger-confirm">
+                    <Notice error>
+                      Full Auto executes high-impact and destructive L3 actions
+                      (merging or closing PRs, creating GitHub repositories, and
+                      destructive Cloudflare deletes such as DNS or Worker
+                      routes) automatically without Telegram approval prompts.
+                    </Notice>
+                    {needsDefaultFullAutoConfirm && (
+                      <label className="checkbox">
+                        <input
+                          type="checkbox"
+                          checked={confirmDefaultFullAuto}
+                          disabled={savingDefault}
+                          onChange={(event) => {
+                            setConfirmDefaultFullAuto(event.target.checked);
+                            setDefaultError("");
+                          }}
+                        />
+                        <span>
+                          I understand L3 high-impact and destructive actions
+                          will run without Telegram approval.
+                        </span>
+                      </label>
+                    )}
+                  </div>
+                )}
+                {defaultError && <Notice error>{defaultError}</Notice>}
+                <ModalActions>
+                  <Action
+                    type="submit"
+                    danger={defaultDraft === "full_auto"}
+                    disabled={
+                      needsDefaultFullAutoConfirm && !confirmDefaultFullAuto
+                    }
+                    loading={savingDefault}
+                    onError={setDefaultError}
+                    onClick={async () => {
+                      setSavingDefault(true);
+                      setDefaultError("");
+                      try {
+                        await api(
+                          `/api/admin/workspaces/${id}/autonomy`,
+                          "PATCH",
+                          {
+                            revision: autonomy.data?.revision ?? 0,
+                            defaultMode: defaultDraft,
+                          },
+                        );
+                        setEditingDefault(false);
+                        notify("Autonomy policy saved.");
+                        autonomy.reload();
+                      } catch (error) {
+                        setDefaultError(
+                          error instanceof Error
+                            ? error.message
+                            : "Unable to save autonomy policy.",
+                        );
+                      } finally {
+                        setSavingDefault(false);
+                      }
+                    }}
+                  >
+                    Save policy
+                  </Action>
+                </ModalActions>
+              </form>
+            </Modal>
+          );
+        })()}
 
       {/* Edit Repository Autonomy Override Modal */}
-      {editingRepo && autonomy.data && (
-        <Modal
-          title={`Autonomy for ${editingRepo.full_name}`}
-          busy={savingRepo}
-          onClose={() => setEditingRepo(undefined)}
-        >
-          <form onSubmit={(event) => event.preventDefault()}>
-            <div className="field">
-              <label htmlFor="autonomy-repo-mode">
-                Repository autonomy mode
-              </label>
-              <Select
-                id="autonomy-repo-mode"
-                value={repoDraft}
-                disabled={savingRepo}
-                onChange={(event) => {
-                  setRepoDraft(
-                    event.target.value as RepositoryAutonomyOverride,
-                  );
-                  setRepoError("");
-                }}
-              >
-                <option value="inherit">Inherit workspace default</option>
-                <option value="supervised">Supervised</option>
-                <option value="check_in">Check-in</option>
-              </Select>
-              <small>
-                L3 actions (merge, release, delete, permissions) remain approval
-                gated in all modes.
-              </small>
-            </div>
-            {repoError && <Notice error>{repoError}</Notice>}
-            <ModalActions>
-              <Action
-                type="submit"
-                loading={savingRepo}
-                onError={setRepoError}
-                onClick={async () => {
-                  setSavingRepo(true);
-                  setRepoError("");
-                  try {
-                    await api(
-                      `/api/admin/workspaces/${id}/github/repositories/${editingRepo.id}/autonomy`,
-                      "PATCH",
-                      {
-                        revision: autonomy.data?.revision ?? 0,
-                        mode: repoDraft,
-                      },
-                    );
-                    setEditingRepo(undefined);
-                    notify(`Updated autonomy for ${editingRepo.full_name}.`);
-                    autonomy.reload();
-                  } catch (error) {
-                    setRepoError(
-                      error instanceof Error
-                        ? error.message
-                        : "Unable to update repository autonomy.",
-                    );
-                  } finally {
-                    setSavingRepo(false);
-                  }
-                }}
-              >
-                Save override
-              </Action>
-            </ModalActions>
-          </form>
-        </Modal>
-      )}
+      {editingRepo &&
+        autonomy.data &&
+        (() => {
+          const needsRepoFullAutoConfirm =
+            repoDraft === "full_auto" && editingRepo.override !== "full_auto";
+          return (
+            <Modal
+              title={`Autonomy for ${editingRepo.full_name}`}
+              busy={savingRepo}
+              onClose={() => setEditingRepo(undefined)}
+            >
+              <form onSubmit={(event) => event.preventDefault()}>
+                <div className="field">
+                  <label htmlFor="autonomy-repo-mode">
+                    Repository autonomy mode
+                  </label>
+                  <Select
+                    id="autonomy-repo-mode"
+                    value={repoDraft}
+                    disabled={savingRepo}
+                    onChange={(event) => {
+                      const next = event.target
+                        .value as RepositoryAutonomyOverride;
+                      setRepoDraft(next);
+                      if (next !== "full_auto") setConfirmRepoFullAuto(false);
+                      setRepoError("");
+                    }}
+                  >
+                    <option value="inherit">Inherit workspace default</option>
+                    <option value="supervised">Supervised</option>
+                    <option value="check_in">Check-in</option>
+                    <option value="full_auto">Full Auto</option>
+                  </Select>
+                  <small>
+                    {repoDraft === "full_auto"
+                      ? "Workspace deletion and permission or autonomy changes remain restricted to workspace admins."
+                      : "L3 actions (merge, close, release) require human approval unless Full Auto is active."}
+                  </small>
+                </div>
+                {repoDraft === "full_auto" && (
+                  <div className="autonomy-danger-confirm">
+                    <Notice error>
+                      Full Auto for {editingRepo.full_name} executes L3
+                      repository actions (such as merging or closing PRs)
+                      automatically without Telegram approval prompts.
+                    </Notice>
+                    {needsRepoFullAutoConfirm && (
+                      <label className="checkbox">
+                        <input
+                          type="checkbox"
+                          checked={confirmRepoFullAuto}
+                          disabled={savingRepo}
+                          onChange={(event) => {
+                            setConfirmRepoFullAuto(event.target.checked);
+                            setRepoError("");
+                          }}
+                        />
+                        <span>
+                          I understand L3 actions on {editingRepo.full_name}{" "}
+                          will run without Telegram approval.
+                        </span>
+                      </label>
+                    )}
+                  </div>
+                )}
+                {repoError && <Notice error>{repoError}</Notice>}
+                <ModalActions>
+                  <Action
+                    type="submit"
+                    danger={repoDraft === "full_auto"}
+                    disabled={needsRepoFullAutoConfirm && !confirmRepoFullAuto}
+                    loading={savingRepo}
+                    onError={setRepoError}
+                    onClick={async () => {
+                      setSavingRepo(true);
+                      setRepoError("");
+                      try {
+                        await api(
+                          `/api/admin/workspaces/${id}/github/repositories/${editingRepo.id}/autonomy`,
+                          "PATCH",
+                          {
+                            revision: autonomy.data?.revision ?? 0,
+                            mode: repoDraft,
+                          },
+                        );
+                        setEditingRepo(undefined);
+                        notify(
+                          `Updated autonomy for ${editingRepo.full_name}.`,
+                        );
+                        autonomy.reload();
+                      } catch (error) {
+                        setRepoError(
+                          error instanceof Error
+                            ? error.message
+                            : "Unable to update repository autonomy.",
+                        );
+                      } finally {
+                        setSavingRepo(false);
+                      }
+                    }}
+                  >
+                    Save override
+                  </Action>
+                </ModalActions>
+              </form>
+            </Modal>
+          );
+        })()}
 
       {/* Mission Detail Inspection Modal */}
       {inspecting && (

@@ -896,4 +896,71 @@ const url = process.env.TEST_DATABASE_URL;
       ),
     ).rejects.toMatchObject({ code: "tool_policy_denied" });
   });
+
+  test("full_auto autonomy auto-approves GitHub repository creation while keeping permission and chat boundaries", async () => {
+    const f = await fixture({
+      account: "alice",
+      githubUser: { id: 42, login: "alice", token: "ghu_alice_secret" },
+    });
+    await store.change(f.w.id, (w) => {
+      w.autonomy = {
+        defaultMode: "full_auto",
+        revision: 1,
+        repositoryOverrides: {},
+      };
+    });
+    const p = provider({
+      accountType: "User",
+      accountId: 42,
+      accountLogin: "alice",
+    });
+    const id = await p.service.propose(
+      f.w.id,
+      f.run.id,
+      "call-auto",
+      { name: "auto-created-repo", visibility: "private" },
+      1,
+      signal(),
+      guard,
+    );
+    const approval = await savedApproval(f.w.id, id);
+    expect(approval?.decision).toBe("approved");
+    expect(approval?.autonomyMode).toBe("full_auto");
+    const beforeSend = await store.read(f.w.id);
+    expect(beforeSend.deliveries).toHaveLength(0);
+    expect(
+      beforeSend.audit.some(
+        (e) => e.action === "github.repository_auto_approved",
+      ),
+    ).toBe(true);
+    await p.service.send(f.w.id, id);
+    expect((await savedApproval(f.w.id, id))?.repository?.state).toBe(
+      "created",
+    );
+
+    // Group chat private repository boundary still holds under full_auto
+    const fGroup = await fixture({
+      chatId: "-100999",
+      account: "alice",
+      githubUser: { id: 42, login: "alice", token: "ghu_alice_secret" },
+    });
+    await store.change(fGroup.w.id, (w) => {
+      w.autonomy = {
+        defaultMode: "full_auto",
+        revision: 1,
+        repositoryOverrides: {},
+      };
+    });
+    await expect(
+      p.service.propose(
+        fGroup.w.id,
+        fGroup.run.id,
+        "call-group-priv",
+        { name: "secret-auto", visibility: "private" },
+        1,
+        signal(),
+        guard,
+      ),
+    ).rejects.toMatchObject({ code: "github_repo_private_chat_required" });
+  });
 });

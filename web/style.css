@@ -1497,6 +1497,20 @@ button.github-repository-more:hover:not(:disabled) {
   border-color: var(--ui-success-border);
   color: var(--ui-success);
 }
+.pill.danger {
+  background: var(--ui-danger-soft);
+  border-color: var(--ui-danger-border);
+  color: var(--ui-danger);
+}
+.autonomy-danger-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.autonomy-danger-confirm .notice {
+  margin: 0;
+}
 .run-card-heading .pill {
   flex: 0 0 auto;
 }

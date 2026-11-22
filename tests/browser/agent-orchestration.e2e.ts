@@ -306,6 +306,36 @@ test("Missions & Orchestration separates saved autonomy display from modal edito
   await expect(dialog).toBeHidden();
   await expect(autonomyCard).toContainText("Automatic with audit trail");
 
+  // Switch workspace default to Full Auto: requires danger confirmation checkbox
+  await autonomyCard
+    .getByRole("button", { name: "Edit autonomy policy" })
+    .click();
+  await expect(dialog).toBeVisible();
+  await chooseOption(
+    dialog.getByRole("combobox", { name: "Workspace default mode" }),
+    "full_auto",
+  );
+  await expect(dialog).toContainText(
+    "Full Auto executes high-impact and destructive L3 actions",
+  );
+  const savePolicyBtn = dialog.getByRole("button", { name: "Save policy" });
+  await expect(savePolicyBtn).toBeDisabled();
+  await dialog
+    .getByRole("checkbox", {
+      name: /I understand L3 high-impact and destructive actions/i,
+    })
+    .check();
+  await expect(savePolicyBtn).toBeEnabled();
+  await savePolicyBtn.click();
+  await expect(dialog).toBeHidden();
+  await expect(autonomyCard.locator(".pill.danger").first()).toHaveText(
+    "Full Auto",
+  );
+  await expect(autonomyCard).toContainText(
+    "Automatic with audit trail (admin changes gated)",
+  );
+  await expect(autonomyCard.locator("select, input")).toHaveCount(0);
+
   // Inspect mission detail modal, then cancel mission via confirmation modal
   const missionsCard = page.locator(
     'section[aria-label="Background missions"]',
@@ -327,7 +357,7 @@ test("Missions & Orchestration separates saved autonomy display from modal edito
     .click();
   await expect(missionsCard).toContainText("cancelled");
 
-  // Edit per-repository autonomy override via row Edit icon modal
+  // Edit per-repository autonomy override via row Edit icon modal (including Full Auto confirmation)
   await autonomyCard
     .getByRole("button", { name: "Edit autonomy for acme/backend" })
     .click();
@@ -335,9 +365,20 @@ test("Missions & Orchestration separates saved autonomy display from modal edito
   await expect(repoDialog).toBeVisible();
   await chooseOption(
     repoDialog.getByRole("combobox", { name: "Repository autonomy mode" }),
-    "supervised",
+    "full_auto",
   );
-  await repoDialog.getByRole("button", { name: "Save override" }).click();
+  await expect(repoDialog).toContainText("Full Auto for acme/backend executes");
+  const saveOverrideBtn = repoDialog.getByRole("button", {
+    name: "Save override",
+  });
+  await expect(saveOverrideBtn).toBeDisabled();
+  await repoDialog
+    .getByRole("checkbox", {
+      name: /I understand L3 actions on acme\/backend/i,
+    })
+    .check();
+  await expect(saveOverrideBtn).toBeEnabled();
+  await saveOverrideBtn.click();
   await expect(repoDialog).toBeHidden();
 
   // Repository queue: single opposite-state Pause/Resume button + Pin + Cancel

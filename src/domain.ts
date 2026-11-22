@@ -1,7 +1,10 @@
 import { z } from "zod";
 import type { ModelOptions } from "./agent/model-settings.ts";
 import type { PluginSettings } from "./agent/plugin-config.ts";
-import type { WorkspaceAutonomyConfig } from "./autonomy/policy.ts";
+import type {
+  AutonomyMode,
+  WorkspaceAutonomyConfig,
+} from "./autonomy/policy.ts";
 import type { AntigravityConfig, CodingConfig } from "./coding/config.ts";
 import { currencies } from "./currency.ts";
 import type { GitHubConnection } from "./github/config.ts";
@@ -472,7 +475,7 @@ export interface Approval {
   payload: unknown;
   expiresAt: string;
   decision?: "approved" | "rejected" | "revoked";
-  autonomyMode?: "supervised" | "check_in";
+  autonomyMode?: AutonomyMode;
   cloudflare?: {
     state: "sending" | "completed" | "failed" | "unknown";
     startedAt: string;

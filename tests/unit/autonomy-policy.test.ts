@@ -138,3 +138,90 @@ test("check_in enables routine non-destructive L1/L2 writes but ALWAYS gates L3 
     },
   ]);
 });
+
+test("full_auto enables L1/L2 and agent L3 actions while keeping admin-only governance actions gated", () => {
+  const w = workspace();
+  w.github = {
+    revision: 1,
+    installationId: 10,
+    repositories: [
+      { id: 100, full_name: "acme/app", default_branch: "main", private: true },
+      {
+        id: 200,
+        full_name: "acme/prod-infra",
+        default_branch: "main",
+        private: true,
+      },
+    ],
+  };
+
+  // Per-repo full_auto override while workspace default stays supervised
+  updateRepositoryAutonomy(w, "101", 100, { revision: 0, mode: "full_auto" });
+  expect(effectiveAutonomyMode(w)).toBe("supervised");
+  expect(effectiveAutonomyMode(w, 100)).toBe("full_auto");
+  expect(effectiveAutonomyMode(w, 200)).toBe("supervised");
+
+  expect(evaluateAutonomy(w, "github_pr_merge", 100)).toMatchObject({
+    actionClass: "L3",
+    effectiveMode: "full_auto",
+    allowedAutomatic: true,
+    requiresApproval: false,
+    reason: "full_auto_l3_automatic",
+  });
+  expect(evaluateAutonomy(w, "github_pr_merge", 200)).toMatchObject({
+    actionClass: "L3",
+    effectiveMode: "supervised",
+    allowedAutomatic: false,
+    requiresApproval: true,
+    reason: "autonomy_l3_approval_required",
+  });
+
+  // Workspace default set to full_auto
+  updateWorkspaceAutonomy(w, "101", { revision: 1, defaultMode: "full_auto" });
+  expect(effectiveAutonomyMode(w)).toBe("full_auto");
+
+  // L1/L2 routine writes are automatic
+  expect(evaluateAutonomy(w, "github_issue_write", 200)).toMatchObject({
+    actionClass: "L1_L2",
+    allowedAutomatic: true,
+    requiresApproval: false,
+    reason: "full_auto_routine_write_automatic",
+  });
+
+  // Agent-exposed L3 actions are automatic under full_auto
+  for (const action of [
+    "github_pr_merge",
+    "github_pr_close",
+    "github_repo_create",
+    "github_release_publish",
+    "cloudflare_destructive_write",
+    "obsidian_permanent_delete",
+  ] as const) {
+    const decision = evaluateAutonomy(w, action, 200);
+    expect(decision.actionClass).toBe("L3");
+    expect(decision.allowedAutomatic).toBe(true);
+    expect(decision.requiresApproval).toBe(false);
+    expect(decision.reason).toBe("full_auto_l3_automatic");
+  }
+
+  // Admin-only governance actions ALWAYS require explicit approval even under full_auto
+  for (const action of [
+    "workspace_delete",
+    "permission_or_autonomy_change",
+  ] as const) {
+    const decision = evaluateAutonomy(w, action, 200);
+    expect(decision.actionClass).toBe("L3");
+    expect(decision.allowedAutomatic).toBe(false);
+    expect(decision.requiresApproval).toBe(true);
+    expect(decision.reason).toBe("autonomy_admin_approval_required");
+  }
+
+  // Downgrading a specific repo override back to check_in re-gates L3 on that repo
+  updateRepositoryAutonomy(w, "101", 200, { revision: 2, mode: "check_in" });
+  expect(evaluateAutonomy(w, "github_pr_merge", 200).requiresApproval).toBe(
+    true,
+  );
+  expect(evaluateAutonomy(w, "github_issue_write", 200).allowedAutomatic).toBe(
+    true,
+  );
+});

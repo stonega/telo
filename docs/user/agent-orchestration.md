@@ -29,7 +29,7 @@ approval for high-impact actions.
 - Inspect active missions, pending waits, verified artifacts, and cancel actions
   anytime from **Missions** in the Admin Panel or by asking in chat.
 
-## Autonomy presets (`Supervised` vs `Check-in`)
+## Autonomy presets (`Supervised`, `Check-in`, and `Full Auto`)
 
 Workspace owners and admins configure autonomy from **Missions → Autonomy policy**:
 
@@ -37,12 +37,19 @@ Workspace owners and admins configure autonomy from **Missions → Autonomy poli
   automatically; external writes require explicit human approval.
 - **Check-in:** Routine non-destructive writes authorized for your account (such as
   GitHub issues, PR creation from verified patches, Obsidian notes, and
-  non-destructive Cloudflare changes) run automatically with full audit entries.
+  non-destructive Cloudflare changes) run automatically with full audit entries,
+  while high-impact L3 actions still require explicit human approval.
+- **Full Auto:** Executes both routine L1/L2 writes and agent-exposed L3
+  high-impact/destructive actions (merging or closing PRs, creating GitHub
+  repositories, and destructive Cloudflare actions such as deleting DNS records
+  or Worker routes) automatically with audit entries and without Telegram
+  approval prompts. Existing actor, repository, and account permission checks
+  still apply.
 - **Per-repository overrides:** Each connected GitHub repository can inherit the
-  workspace default or override it to `Supervised` or `Check-in`.
-- **Immutable L3 approval gates:** Merging or closing PRs, publishing GitHub
-  Releases or tags, deleting resources, and modifying permissions or autonomy
-  policies **always** require explicit human approval in every mode.
+  workspace default or override it to `Supervised`, `Check-in`, or `Full Auto`.
+- **Admin-only governance gates:** Deleting a workspace and modifying workspace
+  permissions, membership, or autonomy policies always remain restricted to
+  workspace admins.
 
 ## Upgraded automations and silent Watchers
 

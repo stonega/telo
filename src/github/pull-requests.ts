@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { evaluateAutonomy } from "../autonomy/policy.ts";
 import type { Store } from "../db/repositories.ts";
 import {
   type Approval,
@@ -284,25 +285,36 @@ export class GitHubPullRequests {
         expiresAt: new Date(Date.now() + 900000).toISOString(),
       };
       w.approvals.push(a);
-      const verb = payload.action === "merge" ? "Merge" : "Close";
-      deliver(
+      const decision = evaluateAutonomy(
         w,
-        run.actor,
-        run.chatId,
-        `${verb} ${payload.repository}#${payload.number}?\n${payload.title}\nhttps://github.com/${payload.repository}/pull/${payload.number}\n\nTarget branch: ${payload.baseBranch}${payload.action === "merge" ? `\nMerge method: ${payload.mergeMethod}\nCommit: ${payload.headSha}` : ""}\n\n${payload.action === "merge" ? "Approving merges this commit into the target branch. GitHub may reject it if repository rules are not satisfied." : "Approving closes this PR without merging or deleting its branch."}`,
-        {
-          runId,
-          topicId: run.topicId,
-          id: `github-pr:${a.id}:review`,
-          buttons: [
-            [
-              { text: "Approve", callback_data: `approve:${a.id}` },
-              { text: "Reject", callback_data: `reject:${a.id}` },
-            ],
-          ],
-        },
+        payload.action === "merge" ? "github_pr_merge" : "github_pr_close",
+        payload.repositoryId,
       );
-      audit(w, run.actor, "github.pr_proposed", a.id);
+      if (decision.allowedAutomatic) {
+        a.decision = "approved";
+        a.autonomyMode = decision.effectiveMode;
+        audit(w, run.actor, "github.pr_auto_approved", a.id);
+      } else {
+        const verb = payload.action === "merge" ? "Merge" : "Close";
+        deliver(
+          w,
+          run.actor,
+          run.chatId,
+          `${verb} ${payload.repository}#${payload.number}?\n${payload.title}\nhttps://github.com/${payload.repository}/pull/${payload.number}\n\nTarget branch: ${payload.baseBranch}${payload.action === "merge" ? `\nMerge method: ${payload.mergeMethod}\nCommit: ${payload.headSha}` : ""}\n\n${payload.action === "merge" ? "Approving merges this commit into the target branch. GitHub may reject it if repository rules are not satisfied." : "Approving closes this PR without merging or deleting its branch."}`,
+          {
+            runId,
+            topicId: run.topicId,
+            id: `github-pr:${a.id}:review`,
+            buttons: [
+              [
+                { text: "Approve", callback_data: `approve:${a.id}` },
+                { text: "Reject", callback_data: `reject:${a.id}` },
+              ],
+            ],
+          },
+        );
+        audit(w, run.actor, "github.pr_proposed", a.id);
+      }
       return a.id;
     });
   }

@@ -796,4 +796,65 @@ const url = process.env.TEST_DATABASE_URL;
     });
     expect((await store.read(f.w.id)).approvals).toHaveLength(0);
   });
+
+  test("full_auto autonomy auto-approves PR merge/close with audit trail while preserving check_in gate", async () => {
+    const f = await fixture();
+    const p = provider();
+    await store.change(f.w.id, (w) => {
+      w.autonomy = {
+        defaultMode: "supervised",
+        revision: 1,
+        repositoryOverrides: { "7001": "full_auto" },
+      };
+    });
+    requireThat(f.w.github, "missing connection");
+    const input: AgentInput = {
+      workspaceId: f.w.id,
+      actor: "101",
+      runId: f.run.id,
+      model: selectedModel("gpt-4.1-mini"),
+      apiKey: "fake",
+      system: "",
+      prompt: "",
+      transcript: [],
+      tools: [],
+      maxTurns: 2,
+      maxTools: 3,
+      signal: signal(),
+      guard,
+      reserve: async () => "attempt",
+      checkpoint: async () => {},
+    };
+    const host = await ExtensionCatalog.fromSnapshot(
+      [],
+      [githubExtension(store, f.w.id, f.w.github, undefined, p.service)],
+    ).open(input);
+    let approvalId = "";
+    try {
+      const tool = host?.tools.find(
+        (t) => t.name === "propose_github_pull_request_action",
+      );
+      requireThat(tool, "missing PR tool");
+      const raw = await tool.execute("auto-merge", args, input.signal);
+      const parsed = JSON.parse(
+        (raw.content[0] as { type: "text"; text: string }).text,
+      ) as { status: string; approvalId: string; autonomyMode?: string };
+      expect(parsed.status).toBe("approved_automatic");
+      expect(parsed.autonomyMode).toBe("full_auto");
+      approvalId = parsed.approvalId;
+    } finally {
+      await host?.close();
+    }
+    const beforeSend = await store.read(f.w.id);
+    expect(beforeSend.deliveries).toHaveLength(0);
+    expect(
+      beforeSend.audit.some((e) => e.action === "github.pr_auto_approved"),
+    ).toBe(true);
+    await p.service.send(f.w.id, approvalId);
+    expect((await saved(f, approvalId))?.pullRequest?.state).toBe("merged");
+    const afterSend = await store.read(f.w.id);
+    expect(afterSend.deliveries.at(-1)?.text).toBe(
+      "PR merged: https://github.com/example/workspace/pull/233",
+    );
+  });
 });

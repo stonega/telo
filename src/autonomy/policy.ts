@@ -2,13 +2,18 @@ import { z } from "zod";
 import { type Admin, requireThat, type Workspace } from "../domain.ts";
 import { audit } from "../workspaces/policy.ts";
 
-export const autonomyModeSchema = z.enum(["supervised", "check_in"]);
+export const autonomyModeSchema = z.enum([
+  "supervised",
+  "check_in",
+  "full_auto",
+]);
 export type AutonomyMode = z.infer<typeof autonomyModeSchema>;
 
 export const repoAutonomyOverrideSchema = z.enum([
   "inherit",
   "supervised",
   "check_in",
+  "full_auto",
 ]);
 export type RepositoryAutonomyOverride = z.infer<
   typeof repoAutonomyOverrideSchema
@@ -50,7 +55,7 @@ export type AutonomyAction =
   | "codex_investigation"
   | "watcher_check"
   | "mission_followup_timer"
-  // L1/L2 — Routine Non-Destructive Writes (automatic under check_in, gated under supervised)
+  // L1/L2 — Routine Non-Destructive Writes (automatic under check_in & full_auto, gated under supervised)
   | "github_pr_create"
   | "github_issue_write"
   | "obsidian_note_write"
@@ -58,7 +63,7 @@ export type AutonomyAction =
   | "lesson_draft_save"
   | "cloudflare_non_destructive_write"
   | "automation_write"
-  // L3 — High-Impact / Destructive (IMMUTABLE human approval gate)
+  // L3 — High-Impact / Destructive (automatic under full_auto except admin-only governance actions)
   | "github_pr_merge"
   | "github_pr_close"
   | "github_repo_create"
@@ -67,6 +72,11 @@ export type AutonomyAction =
   | "obsidian_permanent_delete"
   | "workspace_delete"
   | "permission_or_autonomy_change";
+
+const ADMIN_ONLY_ACTIONS: ReadonlySet<AutonomyAction> = new Set([
+  "workspace_delete",
+  "permission_or_autonomy_change",
+]);
 
 const ACTION_CLASS: Record<AutonomyAction, ActionClass> = {
   read_query: "L0",
@@ -119,14 +129,22 @@ export function effectiveAutonomyMode(
   const cfg = workspaceAutonomy(w);
   if (repositoryId !== undefined) {
     const override = cfg.repositoryOverrides[String(repositoryId)];
-    if (override === "supervised" || override === "check_in") return override;
+    if (
+      override === "supervised" ||
+      override === "check_in" ||
+      override === "full_auto"
+    )
+      return override;
   }
   return cfg.defaultMode;
 }
 
 /**
  * Deterministic server-side autonomy evaluation.
- * L3 high-impact and destructive actions ALWAYS require explicit human approval.
+ * Under `full_auto`, agent-exposed L3 high-impact and destructive actions run
+ * automatically with audit receipts, while admin-only governance actions
+ * (`workspace_delete`, `permission_or_autonomy_change`) always require explicit
+ * admin approval.
  */
 export function evaluateAutonomy(
   w: Workspace,
@@ -146,25 +164,45 @@ export function evaluateAutonomy(
     };
   }
   if (actionClass === "L3") {
+    if (ADMIN_ONLY_ACTIONS.has(action)) {
+      return {
+        action,
+        actionClass,
+        effectiveMode,
+        allowedAutomatic: false,
+        requiresApproval: true,
+        reason:
+          effectiveMode === "full_auto"
+            ? "autonomy_admin_approval_required"
+            : "autonomy_l3_approval_required",
+      };
+    }
+    const automatic = effectiveMode === "full_auto";
     return {
       action,
       actionClass,
       effectiveMode,
-      allowedAutomatic: false,
-      requiresApproval: true,
-      reason: "autonomy_l3_approval_required",
+      allowedAutomatic: automatic,
+      requiresApproval: !automatic,
+      reason: automatic
+        ? "full_auto_l3_automatic"
+        : "autonomy_l3_approval_required",
     };
   }
-  const automatic = effectiveMode === "check_in";
+  const automatic =
+    effectiveMode === "check_in" || effectiveMode === "full_auto";
   return {
     action,
     actionClass,
     effectiveMode,
     allowedAutomatic: automatic,
     requiresApproval: !automatic,
-    reason: automatic
-      ? "check_in_routine_write_automatic"
-      : "supervised_write_approval_required",
+    reason:
+      effectiveMode === "full_auto"
+        ? "full_auto_routine_write_automatic"
+        : automatic
+          ? "check_in_routine_write_automatic"
+          : "supervised_write_approval_required",
   };
 }
 

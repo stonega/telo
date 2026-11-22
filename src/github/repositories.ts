@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { evaluateAutonomy } from "../autonomy/policy.ts";
 import type { Store } from "../db/repositories.ts";
 import {
   type Approval,
@@ -541,37 +542,46 @@ export class GitHubRepositories {
         expiresAt: new Date(Date.now() + 900000).toISOString(),
       };
       current.approvals.push(a);
-      const ownerLabel =
-        payload.ownerType === "organization"
-          ? `${payload.owner} (Organization)`
-          : `${payload.owner} (Personal account)`;
-      const lines = [
-        `Create GitHub repository ${payload.owner}/${payload.name}?`,
-        `Owner: ${ownerLabel}`,
-        `Visibility: ${payload.visibility}`,
-        ...(payload.description ? [`Description: ${payload.description}`] : []),
-        ...(payload.autoInit ? ["Initialize with README: yes"] : []),
-        ...(payload.gitignoreTemplate
-          ? [`.gitignore template: ${payload.gitignoreTemplate}`]
-          : []),
-        ...(payload.licenseTemplate
-          ? [`License: ${payload.licenseTemplate}`]
-          : []),
-        "",
-        `Approving creates this repository under your GitHub account (${payload.githubUserLogin})${payload.ownerType === "organization" ? " following the organization's permission setup" : ""}.`,
-      ];
-      deliver(current, run.actor, run.chatId, lines.join("\n"), {
-        runId,
-        topicId: run.topicId,
-        id: `github-repo:${a.id}:review`,
-        buttons: [
-          [
-            { text: "Approve", callback_data: `approve:${a.id}` },
-            { text: "Reject", callback_data: `reject:${a.id}` },
+      const decision = evaluateAutonomy(current, "github_repo_create");
+      if (decision.allowedAutomatic) {
+        a.decision = "approved";
+        a.autonomyMode = decision.effectiveMode;
+        audit(current, run.actor, "github.repository_auto_approved", a.id);
+      } else {
+        const ownerLabel =
+          payload.ownerType === "organization"
+            ? `${payload.owner} (Organization)`
+            : `${payload.owner} (Personal account)`;
+        const lines = [
+          `Create GitHub repository ${payload.owner}/${payload.name}?`,
+          `Owner: ${ownerLabel}`,
+          `Visibility: ${payload.visibility}`,
+          ...(payload.description
+            ? [`Description: ${payload.description}`]
+            : []),
+          ...(payload.autoInit ? ["Initialize with README: yes"] : []),
+          ...(payload.gitignoreTemplate
+            ? [`.gitignore template: ${payload.gitignoreTemplate}`]
+            : []),
+          ...(payload.licenseTemplate
+            ? [`License: ${payload.licenseTemplate}`]
+            : []),
+          "",
+          `Approving creates this repository under your GitHub account (${payload.githubUserLogin})${payload.ownerType === "organization" ? " following the organization's permission setup" : ""}.`,
+        ];
+        deliver(current, run.actor, run.chatId, lines.join("\n"), {
+          runId,
+          topicId: run.topicId,
+          id: `github-repo:${a.id}:review`,
+          buttons: [
+            [
+              { text: "Approve", callback_data: `approve:${a.id}` },
+              { text: "Reject", callback_data: `reject:${a.id}` },
+            ],
           ],
-        ],
-      });
-      audit(current, run.actor, "github.repository_proposed", a.id);
+        });
+        audit(current, run.actor, "github.repository_proposed", a.id);
+      }
       return a.id;
     });
   }

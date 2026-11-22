@@ -982,5 +982,47 @@ const url = process.env.TEST_DATABASE_URL;
       expect(JSON.stringify(current)).not.toContain("secret provider body");
       expect(f.requests.filter((r) => r.init.method !== "GET")).toHaveLength(1);
     });
+    test("full_auto autonomy auto-approves destructive Cloudflare deletes while check_in keeps them gated", async () => {
+      // Under check_in, delete_dns_record remains approval-gated
+      const fCheckIn = await fixture();
+      await store.change(fCheckIn.w.id, (w) => {
+        w.autonomy = {
+          defaultMode: "check_in",
+          revision: 1,
+          repositoryOverrides: {},
+        };
+      });
+      const gated = await proposal(fCheckIn, {
+        action: "delete_dns_record",
+        zoneId,
+        recordId,
+      });
+      expect(gated.status).toBe("awaiting_approval");
+
+      // Under full_auto, delete_dns_record auto-approves with audit trail and executes via send()
+      const fFullAuto = await fixture();
+      await store.change(fFullAuto.w.id, (w) => {
+        w.autonomy = {
+          defaultMode: "full_auto",
+          revision: 1,
+          repositoryOverrides: {},
+        };
+      });
+      const auto = await proposal(fFullAuto, {
+        action: "delete_dns_record",
+        zoneId,
+        recordId,
+      });
+      expect(auto.status).toBe("approved_automatic");
+      const beforeSend = await store.read(fFullAuto.w.id);
+      expect(beforeSend.deliveries).toHaveLength(0);
+      expect(
+        beforeSend.audit.some((e) => e.action === "cloudflare.auto_approved"),
+      ).toBe(true);
+      await fFullAuto.service.send(fFullAuto.w.id, auto.approvalId);
+      expect(
+        (await store.read(fFullAuto.w.id)).approvals[0]?.cloudflare?.state,
+      ).toBe("completed");
+    });
   },
 );
