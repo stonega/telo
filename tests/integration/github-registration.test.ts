@@ -213,6 +213,7 @@ const url = process.env.TEST_DATABASE_URL;
       issues: "write",
       pull_requests: "write",
       members: "read",
+      repository_creation: "write",
     });
     expect(JSON.stringify(result)).not.toContain("secret");
     const personal = await service.register(admin, id, hash(auth.raw), {
@@ -540,6 +541,7 @@ const url = process.env.TEST_DATABASE_URL;
       issues: "write",
       pull_requests: "write",
       members: "read",
+      repository_creation: "write",
     };
     for (const override of [
       { permissions: { contents: "write" } },
@@ -550,6 +552,8 @@ const url = process.env.TEST_DATABASE_URL;
       { permissions: { ...permissions, actions: "write" } },
       { permissions: { ...permissions, workflows: "write" } },
       { permissions: { ...permissions, members: "write" } },
+      { permissions: { ...permissions, repository_creation: "read" } },
+      { permissions: { ...permissions, administration: "write" } },
       { permissions: { ...permissions, checks: "write" } },
       { permissions: { ...permissions, statuses: "write" } },
       { owner: { login: "wrong-org" } },

@@ -195,7 +195,9 @@ export function invalidateGitHubWork(
       w.approvals.some(
         (a) =>
           a.runId === run.id &&
-          ["github_issue", "github_pull_request"].includes(a.kind) &&
+          ["github_issue", "github_pull_request", "github_repository"].includes(
+            a.kind,
+          ) &&
           approvalAffected(a.payload),
       )
     )
@@ -214,10 +216,13 @@ export function invalidateGitHubWork(
   for (const a of w.approvals) {
     if (
       a.actor === actor &&
-      ["github_issue", "github_pull_request"].includes(a.kind) &&
+      ["github_issue", "github_pull_request", "github_repository"].includes(
+        a.kind,
+      ) &&
       approvalAffected(a.payload) &&
       !a.issue &&
       !a.pullRequest &&
+      !a.repository &&
       a.decision !== "rejected"
     )
       a.decision = "revoked";

@@ -36,6 +36,7 @@ import { githubExtension } from "../github/extension.ts";
 import { GitHubMetadata } from "../github/metadata.ts";
 import { GitHubPullRequests } from "../github/pull-requests.ts";
 import { GitHubApps } from "../github/registry.ts";
+import { GitHubRepositories } from "../github/repositories.ts";
 import { repositoryAccess } from "../github/user-access.ts";
 import {
   type GoogleRegistration,
@@ -84,6 +85,7 @@ export interface PluginServiceDependencies {
   manifestPath?: string;
   codeTruth?: CodeTruthClient;
   githubApp?: GitHubApp | GitHubApps;
+  encryptionKey?: string;
   cloudflare?: CloudflareService;
   searchConsole?: SearchConsoleService;
   google?: GoogleService;
@@ -99,6 +101,7 @@ export class PluginService {
   private manifestPath?: string;
   private codeTruth?: CodeTruthClient;
   private githubApp?: GitHubApp | GitHubApps;
+  private encryptionKey?: string;
   readonly cloudflare?: CloudflareService;
   readonly searchConsole?: SearchConsoleService;
   readonly google?: GoogleService;
@@ -154,6 +157,7 @@ export class PluginService {
     this.manifestPath = deps.manifestPath;
     this.codeTruth = deps.codeTruth;
     this.githubApp = deps.githubApp;
+    this.encryptionKey = deps.encryptionKey;
     this.cloudflare = deps.cloudflare;
     this.searchConsole = deps.searchConsole;
     this.google = deps.google;
@@ -526,7 +530,7 @@ export class PluginService {
       builtins.push(codingExtension(this.store, workspace));
     if (
       workspace.github?.installationId &&
-      workspace.github.repositories.length
+      (workspace.github.repositories.length > 0 || this.githubApp)
     )
       builtins.push(
         githubExtension(
@@ -538,6 +542,13 @@ export class PluginService {
             : undefined,
           this.githubApp
             ? new GitHubPullRequests(this.store, this.githubApp)
+            : undefined,
+          this.githubApp
+            ? new GitHubRepositories(
+                this.store,
+                this.githubApp,
+                this.encryptionKey,
+              )
             : undefined,
         ),
       );

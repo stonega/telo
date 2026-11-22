@@ -43,11 +43,11 @@ checked 2026-11-13.
    organization, or when supporting other accounts.
 3. Setup sends the manifest when you click **Connect GitHub**. In Plugins, click
    **Continue to GitHub**. Confirm creation on GitHub. The manifest preconfigures
-   Contents, Issues and Pull requests read/write access, Metadata read access,
+   Contents, Issues, Pull requests and Repository creation read/write access, Metadata read access,
    organization Members read access,
    `issues`, `pull_request`, `issue_comment` and `pull_request_review_comment` webhook
    subscriptions, and the deployment's callbacks. These permissions support
-   Codex checkout, PR publication and approved PR merge/close actions; coding policies and task authorization
+   Codex checkout, PR publication, repository creation and approved PR merge/close actions; coding policies and task authorization
    still control each operation. The callback accepts exactly this permission set
    and rejects missing grants or additional permissions.
    With a public HTTPS domain, webhook delivery is enabled at
@@ -451,6 +451,52 @@ retention and workspace-deletion policy. See [the runnable journey](../../exampl
 
 References: [Merge a pull request](https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request),
 [Update a pull request](https://docs.github.com/en/rest/pulls/pulls#update-a-pull-request).
+
+## Create a new repository from Telegram
+
+Ask “Create a private repo named new-service with a README” or “Create a public
+repository docs-site”. The built-in `propose_github_repository` tool loads
+whenever the workspace has a connected GitHub App installation (even if no
+repositories are connected yet).
+
+Repository creation always requires a verified personal GitHub account
+connection (`/github` in private chat) and explicit Telegram **Approve** /
+**Reject** confirmation from the requester within 15 minutes (immutable L3 gate;
+scheduled runs cannot propose repository creation). Private and internal
+repository creation must be requested in a private Telegram chat.
+
+- **Personal account installation (`User`)**: only the verified owner of that
+  personal GitHub account can create repositories under it (`POST /user/repos`,
+  using the requester's GitHub App user access token). Other workspace members
+  (including workspace admins) are denied. Personal accounts support `private`
+  (default) and `public` visibility.
+- **GitHub organization installation (`Organization`)**: creation runs under the
+  requester's verified GitHub App user access token (`POST /orgs/{org}/repos`),
+  following the organization's exact permission setup. When the installation
+  has organization `Members: read`, Telo checks active organization membership
+  and any returned `members_can_create_*` organization policy settings before
+  proposing, and GitHub authoritatively enforces org owner, base member
+  privileges, custom organization roles and enterprise policies on execution.
+  Organization repositories support `private` (default), `public` and `internal`
+  visibility.
+
+New GitHub App manifests request **Repository permissions → Repository creation:
+Read and write** (least privilege; no repository deletion/transfer scope).
+**Existing Apps** must grant **Repository creation: Read and write** (or
+**Administration: Read and write**) and approve the updated permissions on the
+matching GitHub installation; reconnecting alone does not grant missing
+permissions.
+
+A committed approval reservation prevents duplicate creation across retries,
+concurrent workers and restarts; uncertain network/5xx outcomes become
+**unknown** without automatic retry. When the workspace uses `allRepositories:
+true`, the newly created repository is added immediately to the workspace's
+connected repository list and linked members' permission sync is nudged.
+Selected-only workspaces keep their explicit repository selection and report
+the new repository URL.
+
+References: [Create a repository for the authenticated user](https://docs.github.com/en/rest/repos/repos#create-a-repository-for-the-authenticated-user),
+[Create an organization repository](https://docs.github.com/en/rest/repos/repos#create-an-organization-repository).
 
 ## Fetch GitHub accounts in member forms
 

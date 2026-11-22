@@ -433,6 +433,8 @@ export async function tickMissions(
         (approval.kind === "github_pull_request" &&
           (!approval.pullRequest ||
             approval.pullRequest.state === "sending")) ||
+        (approval.kind === "github_repository" &&
+          (!approval.repository || approval.repository.state === "sending")) ||
         (approval.kind === "cloudflare_action" &&
           (!approval.cloudflare || approval.cloudflare.state === "sending"))
       ) {
@@ -443,6 +445,8 @@ export async function tickMissions(
         approval.issue?.state === "unknown" ||
         approval.pullRequest?.state === "failed" ||
         approval.pullRequest?.state === "unknown" ||
+        approval.repository?.state === "failed" ||
+        approval.repository?.state === "unknown" ||
         approval.cloudflare?.state === "failed" ||
         approval.cloudflare?.state === "unknown";
       const res = await resolveMissionWait(
@@ -467,7 +471,13 @@ export async function tickMissions(
                   label: "Pull request action",
                   value: approval.pullRequest.url,
                 }
-              : undefined,
+              : approval.repository?.url
+                ? {
+                    kind: "reference",
+                    label: approval.repository.fullName ?? "Repository",
+                    value: approval.repository.url,
+                  }
+                : undefined,
           data: {
             decision: approval.decision,
             kind: approval.kind,

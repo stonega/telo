@@ -17,7 +17,7 @@ GitHub 的 **Authorized GitHub Apps** 仅表示身份授权；**Installed GitHub
 
 ### App 权限与仓库变更
 
-完整工作流使用 Contents、Issues、Pull requests 的读写权限和 Metadata 只读权限；成员目录还使用组织 Members 只读权限。新 App 会预填这些权限。
+完整工作流使用 Contents、Issues、Pull requests、Repository creation 的读写权限和 Metadata 只读权限；成员目录还使用组织 Members 只读权限。新 App 会预填这些权限。
 
 已有 App 增加权限后，需要在 GitHub installation 接受新权限，组织可能需要 owner 批准。仅在 Telo 重新连接不能授予缺失权限。
 
@@ -72,6 +72,17 @@ GitHub 连接本身支持元数据、PR 改动及审查记录查询，不要求�
 合并前 PR 发生变化会使提案失效，需要重新检查。不会自动绕过 GitHub 分支规则；草稿 PR、merge queue 等情况可能需要 GitHub 自己的流程。关闭不会合并或删除分支。
 
 Codex 创建 PR 不代表授权合并。使用消息上的 **Review / Merge** 会打开 GitHub 页面，不会仅因点击链接而执行合并。
+
+## 创建新仓库
+
+例如：“创建一个名为 new-service 的私有仓库，初始化 README”，或“创建一个公开仓库 docs-site”。
+
+请求者必须先在机器人私聊中验证自己的 GitHub 账号（`/github`），并在十五分钟内本人点击 **Approve** 确认仓库归属、名称、可见性（默认 `private`）及初始化选项。私有或内部仓库需在私聊中发起。
+
+- **个人账号连接**：仅该个人 GitHub 账号本人可在该账号下创建新仓库（支持 `private` / `public`）；工作区其他成员（含工作区管理员）不可代建。
+- **GitHub 组织连接**：使用请求者本人的已验证 GitHub 账号在组织下创建，遵循组织本身的权限设置（组织 owner、成员建库权限及公开/私有/内部可见性限制等）。
+
+新建 GitHub App 会预填 **Repository permissions → Repository creation: Read and write** 权限；已有 App 需在 GitHub App 设置中补充 **Repository creation: Read and write**（或 **Administration: Read and write**）并在对应 installation 接受权限更新。开启“所有仓库自动同步”的工作区会在创建成功后立即将该仓库纳入工作区连接列表；仅选择指定仓库的工作区保持原选择并在消息中返回新仓库链接。
 
 ## 开发与审查
 

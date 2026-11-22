@@ -25,6 +25,7 @@ export function pluginRuntime(store: Store, cfg: Config, github: GitHubApps) {
         ? new CodeTruthClient(cfg.CODE_TRUTH_URL, cfg.CODE_TRUTH_TOKEN)
         : undefined,
     githubApp: github,
+    encryptionKey: cfg.ENCRYPTION_KEY,
     cloudflare: new CloudflareService(
       store,
       cfg.ENCRYPTION_KEY,

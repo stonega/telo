@@ -12,6 +12,7 @@ export const githubAppPermissions = {
   issues: "write",
   pull_requests: "write",
   members: "read",
+  repository_creation: "write",
 } as const;
 
 const account = z

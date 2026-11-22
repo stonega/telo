@@ -61,6 +61,7 @@ export type AutonomyAction =
   // L3 — High-Impact / Destructive (IMMUTABLE human approval gate)
   | "github_pr_merge"
   | "github_pr_close"
+  | "github_repo_create"
   | "github_release_publish"
   | "cloudflare_destructive_write"
   | "obsidian_permanent_delete"
@@ -84,6 +85,7 @@ const ACTION_CLASS: Record<AutonomyAction, ActionClass> = {
 
   github_pr_merge: "L3",
   github_pr_close: "L3",
+  github_repo_create: "L3",
   github_release_publish: "L3",
   cloudflare_destructive_write: "L3",
   obsidian_permanent_delete: "L3",
@@ -249,6 +251,7 @@ export interface AutonomyView {
 
 export const L3_IMMUTABLE_GATES = [
   "Merge or close GitHub pull requests",
+  "Create new GitHub repositories",
   "Publish GitHub Releases, tags, or release assets",
   "Delete DNS/Pages resources or destroy workspace data",
   "Modify workspace permissions, membership, or autonomy policies",

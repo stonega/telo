@@ -5,6 +5,28 @@ Historical verification logs are archived by month to keep this active status le
 - [October 2026 archive](archive/implementation-status-2026-10.md) (125 entries)
 - [September 2026 baseline archive](archive/implementation-status-2026-09.md) (32 entries)
 
+## GitHub repository creation for personal accounts and organizations (2026-11-22)
+
+Added Telegram-approved GitHub repository creation (`propose_github_repository`) with zero new runtime dependencies or database migrations:
+
+1. **GitHub App permission & REST API client (`src/github/registry.ts`, `src/github/app.ts`)**:
+   - Added least-privilege `repository_creation: "write"` to `githubAppPermissions` for new App manifests (without granting broader `administration: "write"` deletion/transfer privileges); existing installations with either `repository_creation: "write"` or `administration: "write"` are accepted at invocation time.
+   - Added `GitHubApp.installation`, `organizationMembership`, `organization`, and one-shot `createRepository` (`POST /user/repos` for personal accounts, `POST /orgs/{org}/repos` for organizations) with strict validation, no retries/redirects, and safe error classification.
+2. **Personal-owner & organization-permission enforcement (`src/github/repositories.ts`, `src/domain.ts`, `src/autonomy/policy.ts`, `src/github/extension.ts`, `src/github/user-access.ts`, `src/workflows/service.ts`, `src/orchestration/wakeup.ts`, `src/agent/plugin-service.ts`, `src/agent/plugin-runtime.ts`, `src/jobs/queue.ts`, `src/worker.ts`)**:
+   - Always requires a verified personal GitHub account connection (`/github` in private chat), interactive non-scheduled runs, private Telegram chat for `private`/`internal` visibility, and explicit requester approval within 15 minutes (immutable L3 gate).
+   - **Personal account installations (`User`)**: verifies the requester's live GitHub identity matches the connected personal account owner, blocks other workspace members (including admins), rejects `internal` visibility, and calls `POST /user/repos` with the owner's rotated user access token.
+   - **Organization installations (`Organization`)**: verifies active organization membership (when `members: read` is granted) and evaluates returned `members_can_create_*` org policy rules before proposing, then executes `POST /orgs/{org}/repos` using the requester's user access token so GitHub authoritatively enforces the organization's exact permission setup (org owners, member privileges, custom org roles and enterprise policies).
+   - Loads `propose_github_repository` whenever `workspace.github.installationId` is connected (including 0-repository workspaces), commits an atomic reservation before `POST`, immediately adds the created repository to `w.github.repositories` (and nudges member permission sync) when `allRepositories: true`, and preserves explicit selection when selected-only.
+3. **Skill & documentation (`skills/telo-github/SKILL.md`, `docs/implementation/github-app.md`, `docs/design/github-workflows.md`, `docs/user/github.md`)**:
+   - Documented personal vs. organization repository creation rules, required App permissions and Telegram guidance.
+
+Local verification on Bun 1.4.4, Node 22.22.3, and disposable PostgreSQL 17:
+
+- `bun run check` (only the nine pre-existing incident-script warnings), `bun run typecheck`, `bun run build`, and `bun run test:runtime` (16 ordinary + 16 configured startup cases including `propose_github_repository`, **zero external startup calls**) pass.
+- Full unit suite (`bun test tests/unit`): **1,009 passed, 9 Docker-gated skips, 0 failures** across 132 files (6,049 assertions), including new `tests/unit/github-repositories.test.ts`.
+- Selected PostgreSQL integration suites (`github-repositories`, `github-registration`, `github-pull-requests`, `github-issues`, `github-members`, `github-repository-sync`, `github-users`, `github`, `agent-orchestration`): **89 passed, 0 failures** (730 assertions).
+- Browser tests were not run because no `web/` source, dependencies, or UI behavior changed (updated manifest permission expectation in `tests/browser/admin.e2e.ts` for `repository_creation: "write"`). Live GitHub API calls, Telegram rendering, and deployment remain outside local verification.
+
 ## Full rename to Telo and sunny Telegram-style logo (2026-11-21)
 
 Completed a full clean rename from **RepoDesk** (and legacy `deepx` Docker/PostgreSQL/coding-runner defaults) to **Telo** (`stonega/telo`), preserving historical incident records (`postmortem/`, `docs/implementation/archive/`) and upstream Code Truth attribution (`services/code-truth/UPSTREAM.md`):

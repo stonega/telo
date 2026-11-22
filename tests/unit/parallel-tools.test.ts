@@ -39,6 +39,7 @@ test("tool metadata classifies read-only vs mutating tools conservatively", () =
   expect(isParallelReadOnlyTool("obsidian_write")).toBe(false);
   expect(isParallelReadOnlyTool("start_development_task")).toBe(false);
   expect(isParallelReadOnlyTool("propose_github_issue")).toBe(false);
+  expect(isParallelReadOnlyTool("propose_github_repository")).toBe(false);
   expect(isParallelReadOnlyTool("delegate_research")).toBe(false);
   expect(isSubagentSafeTool("delegate_research")).toBe(false);
   expect(toolExecutionMode("query_github_metadata", true)).toBe("parallel");

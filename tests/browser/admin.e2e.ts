@@ -1545,6 +1545,7 @@ test.describe
             issues: "write",
             pull_requests: "write",
             members: "read",
+            repository_creation: "write",
           });
           expect(manifest.hook_attributes).toEqual({
             url: "https://example.com/github/webhook",

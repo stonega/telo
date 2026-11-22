@@ -15,6 +15,7 @@ import {
   hasActiveGitHubNotifications,
 } from "../github/notifications.ts";
 import type { GitHubPullRequests } from "../github/pull-requests.ts";
+import type { GitHubRepositories } from "../github/repositories.ts";
 import type { RepositorySync } from "../github/repository-sync.ts";
 import type { GitHubUsers } from "../github/users.ts";
 import type { GitHubWebhooks } from "../github/webhooks.ts";
@@ -88,6 +89,7 @@ export interface WorkerDependencies {
   repositorySync?: RepositorySync;
   review?: ReviewExecutor;
   githubPullRequests?: GitHubPullRequests;
+  githubRepositories?: GitHubRepositories;
   cloudflare?: CloudflareService;
   google?: GoogleService;
   searchConsole?: SearchConsoleService;
@@ -164,6 +166,7 @@ export async function startWorker(
     githubUsers,
     review,
     githubPullRequests,
+    githubRepositories,
     cloudflare,
     google,
     searchConsole,
@@ -329,6 +332,14 @@ export async function startWorker(
                 approval.pullRequest.state === "sending")
             )
               await githubPullRequests.send(workspaceId, approval.id);
+        if (githubRepositories && d.active && !d.paused)
+          for (const approval of current.approvals)
+            if (
+              approval.kind === "github_repository" &&
+              approval.decision === "approved" &&
+              (!approval.repository || approval.repository.state === "sending")
+            )
+              await githubRepositories.send(workspaceId, approval.id);
         if (cloudflare && d.active && !d.paused)
           for (const approval of current.approvals)
             if (

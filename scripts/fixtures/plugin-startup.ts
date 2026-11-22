@@ -385,6 +385,7 @@ export async function verifyPluginStartup(
             "configure_repository_tasks",
             "manage_preference",
             "propose_github_issue",
+            "propose_github_repository",
             "query_github_metadata",
             ...codeTruthTools,
           ])

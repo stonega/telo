@@ -8,6 +8,7 @@ import { configuredGitHubApp } from "./github/app.ts";
 import { GitHubIssues } from "./github/issues.ts";
 import { GitHubPullRequests } from "./github/pull-requests.ts";
 import { GitHubApps } from "./github/registry.ts";
+import { GitHubRepositories } from "./github/repositories.ts";
 import { RepositorySync } from "./github/repository-sync.ts";
 import { GitHubUsers } from "./github/users.ts";
 import { GitHubWebhooks } from "./github/webhooks.ts";
@@ -66,6 +67,11 @@ const stop = await startWorker({
     cfg.ENCRYPTION_KEY,
   ),
   githubPullRequests: new GitHubPullRequests(store, githubApps),
+  githubRepositories: new GitHubRepositories(
+    store,
+    githubApps,
+    cfg.ENCRYPTION_KEY,
+  ),
   cloudflare: plugins.cloudflare,
   google: plugins.google,
   searchConsole: plugins.searchConsole,

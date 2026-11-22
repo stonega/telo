@@ -15,6 +15,7 @@ import {
 import { checkIssueApproval } from "../github/issues.ts";
 import { workflowRepositoriesAllowed } from "../github/metadata-policy.ts";
 import { checkPullApproval } from "../github/pull-requests.ts";
+import { checkRepositoryCreateApproval } from "../github/repositories.ts";
 import { fingerprint } from "../setup/credentials.ts";
 import { approveSkill } from "../skills/proposals.ts";
 import {
@@ -286,6 +287,8 @@ export function decide(
     checkIssueApproval(w, approval);
   if (accept && approval.kind === "github_pull_request")
     checkPullApproval(w, approval);
+  if (accept && approval.kind === "github_repository")
+    checkRepositoryCreateApproval(w, approval);
   if (accept && approval.kind === "workflow") {
     const workflow = w.workflows.find((f) => f.id === approval.target);
     requireThat(

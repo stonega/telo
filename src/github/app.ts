@@ -66,6 +66,39 @@ export interface GitHubInstallation {
   id: number;
   account: string;
 }
+export interface GitHubInstallationDetails {
+  id: number;
+  account: GitHubMember & { type: "Organization" | "User" };
+  repositorySelection?: "all" | "selected";
+  permissions: Record<string, string | undefined>;
+}
+export interface GitHubOrganizationMembership {
+  state: "active" | "pending";
+  role: "admin" | "member";
+}
+export interface GitHubOrganizationPolicy {
+  id: number;
+  login: string;
+  members_can_create_repositories?: boolean | null;
+  members_can_create_public_repositories?: boolean | null;
+  members_can_create_private_repositories?: boolean | null;
+  members_can_create_internal_repositories?: boolean | null;
+  members_allowed_repository_creation_type?: "all" | "private" | "none" | null;
+}
+export interface CreateRepositoryRequest {
+  ownerType: "personal" | "organization";
+  owner: string;
+  name: string;
+  description?: string;
+  visibility: "public" | "private" | "internal";
+  autoInit?: boolean;
+  gitignoreTemplate?: string;
+  licenseTemplate?: string;
+}
+export interface CreatedGitHubRepository {
+  repository: GitHubRepository;
+  url: string;
+}
 export class GitHubApp {
   releaseClient(repository: string, token: string) {
     return new ReleaseGitHub(repository, token, this.transport);
@@ -345,15 +378,20 @@ export class GitHubApp {
       controller.abort();
     }
   }
-  private async fetchMembers(installationId: number, signal: AbortSignal) {
+  async installation(
+    installationId: number,
+    signal?: AbortSignal,
+  ): Promise<GitHubInstallationDetails> {
     const installation = z
       .object({
+        id: z.number().int().positive().optional(),
         app_id: z.number().int().positive(),
         account: memberSchema.extend({
           type: z.enum(["Organization", "User"]),
         }),
         suspended_at: z.string().nullable(),
-        permissions: z.object({ members: z.string().optional() }),
+        repository_selection: z.enum(["all", "selected"]).optional(),
+        permissions: z.record(z.string(), z.string().optional()),
       })
       .parse(
         await this.request(
@@ -368,6 +406,15 @@ export class GitHubApp {
       "github_access_denied",
       403,
     );
+    return {
+      id: installation.id ?? installationId,
+      account: installation.account,
+      repositorySelection: installation.repository_selection,
+      permissions: installation.permissions,
+    };
+  }
+  private async fetchMembers(installationId: number, signal: AbortSignal) {
+    const installation = await this.installation(installationId, signal);
     const organization = installation.account.type === "Organization";
     if (!organization)
       return {
@@ -743,6 +790,197 @@ export class GitHubApp {
     } catch (error) {
       if (error instanceof Fault) throw error;
       throw new Fault("github_pr_outcome_unknown", 409);
+    }
+  }
+  async organizationMembership(
+    userToken: string,
+    org: string,
+    signal?: AbortSignal,
+  ): Promise<GitHubOrganizationMembership> {
+    const login = githubUsernameSchema.parse(org);
+    return z
+      .object({
+        state: z.enum(["active", "pending"]),
+        role: z.enum(["admin", "member"]),
+      })
+      .parse(
+        await this.request(
+          `https://api.github.com/user/memberships/orgs/${login}`,
+          userToken,
+          undefined,
+          signal,
+        ),
+      );
+  }
+  async organization(
+    token: string,
+    org: string,
+    signal?: AbortSignal,
+  ): Promise<GitHubOrganizationPolicy> {
+    const login = githubUsernameSchema.parse(org);
+    return z
+      .object({
+        id: z.number().int().positive().safe(),
+        login: z.string().min(1).max(100),
+        members_can_create_repositories: z.boolean().nullable().optional(),
+        members_can_create_public_repositories: z
+          .boolean()
+          .nullable()
+          .optional(),
+        members_can_create_private_repositories: z
+          .boolean()
+          .nullable()
+          .optional(),
+        members_can_create_internal_repositories: z
+          .boolean()
+          .nullable()
+          .optional(),
+        members_allowed_repository_creation_type: z
+          .enum(["all", "private", "none"])
+          .nullable()
+          .optional(),
+      })
+      .parse(
+        await this.request(
+          `https://api.github.com/orgs/${login}`,
+          token,
+          undefined,
+          signal,
+        ),
+      );
+  }
+  async createRepository(
+    userToken: string,
+    input: CreateRepositoryRequest,
+  ): Promise<CreatedGitHubRepository> {
+    const owner = githubUsernameSchema.parse(input.owner);
+    requireThat(
+      /^[A-Za-z0-9_.-]{1,100}$/.test(input.name) &&
+        input.name !== "." &&
+        input.name !== "..",
+      "github_repo_rejected",
+      400,
+    );
+    const url =
+      input.ownerType === "organization"
+        ? `https://api.github.com/orgs/${owner}/repos`
+        : "https://api.github.com/user/repos";
+    const body =
+      input.ownerType === "organization"
+        ? {
+            name: input.name,
+            ...(input.description ? { description: input.description } : {}),
+            visibility: input.visibility,
+            private: input.visibility !== "public",
+            ...(input.autoInit ? { auto_init: true } : {}),
+            ...(input.gitignoreTemplate
+              ? { gitignore_template: input.gitignoreTemplate }
+              : {}),
+            ...(input.licenseTemplate
+              ? { license_template: input.licenseTemplate }
+              : {}),
+          }
+        : {
+            name: input.name,
+            ...(input.description ? { description: input.description } : {}),
+            private: input.visibility === "private",
+            ...(input.autoInit ? { auto_init: true } : {}),
+            ...(input.gitignoreTemplate
+              ? { gitignore_template: input.gitignoreTemplate }
+              : {}),
+            ...(input.licenseTemplate
+              ? { license_template: input.licenseTemplate }
+              : {}),
+          };
+    // One attempt only: an ambiguous POST must never be replayed.
+    try {
+      const response = await this.transport(url, {
+        method: "POST",
+        headers: {
+          accept: "application/vnd.github+json",
+          "content-type": "application/json",
+          "X-GitHub-Api-Version": "2026-03-10",
+          authorization: `Bearer ${userToken}`,
+        },
+        body: JSON.stringify(body),
+        redirect: "error",
+        signal: AbortSignal.timeout(10000),
+      });
+      if (response.status === 401)
+        throw new Fault("github_authorization_expired", 403);
+      if (response.status === 403 || response.status === 429) {
+        const error = z
+          .object({ message: z.string().optional() })
+          .safeParse(await response.json().catch(() => null));
+        const message = error.success ? (error.data.message ?? "") : "";
+        if (
+          response.status === 429 ||
+          response.headers.get("x-ratelimit-remaining") === "0" ||
+          response.headers.has("retry-after") ||
+          /secondary rate limit|abuse detection/i.test(message)
+        )
+          throw new Fault("github_rate_limited", 503);
+        if (/resource not accessible by integration/i.test(message))
+          throw new Fault("github_app_permissions_missing", 409);
+        if (
+          input.ownerType === "organization" &&
+          /not allowed to create|cannot create|visibility|member privileges|organization/i.test(
+            message,
+          )
+        )
+          throw new Fault("github_org_repo_creation_denied", 403);
+        throw new Fault("github_repo_access_denied", 403);
+      }
+      if (response.status === 404)
+        throw new Fault("github_repo_access_denied", 403);
+      if (response.status === 422) {
+        const error = z
+          .object({
+            message: z.string().optional(),
+            errors: z
+              .array(
+                z.object({
+                  message: z.string().optional(),
+                  field: z.string().optional(),
+                  code: z.string().optional(),
+                }),
+              )
+              .optional(),
+          })
+          .safeParse(await response.json().catch(() => null));
+        const combined = error.success
+          ? [
+              error.data.message ?? "",
+              ...(error.data.errors?.map((e) => e.message ?? "") ?? []),
+            ].join(" ")
+          : "";
+        if (/already exists/i.test(combined))
+          throw new Fault("github_repo_already_exists", 409);
+        if (
+          input.ownerType === "organization" &&
+          /not allowed to create|cannot create|visibility|member privileges/i.test(
+            combined,
+          )
+        )
+          throw new Fault("github_org_repo_creation_denied", 403);
+        throw new Fault("github_repo_rejected", 409);
+      }
+      if (response.status === 400) throw new Fault("github_repo_rejected", 409);
+      requireThat(response.status === 201, "github_repo_outcome_unknown", 409);
+      const repo = repositorySchema.parse(await response.json());
+      const [createdOwner] = repo.full_name.split("/");
+      requireThat(
+        createdOwner?.toLowerCase() === owner.toLowerCase(),
+        "github_repo_outcome_unknown",
+        409,
+      );
+      return {
+        repository: repo,
+        url: `https://github.com/${repo.full_name}`,
+      };
+    } catch (error) {
+      if (error instanceof Fault) throw error;
+      throw new Fault("github_repo_outcome_unknown", 409);
     }
   }
   async createIssue(

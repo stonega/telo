@@ -47,6 +47,18 @@ These instructions guide tool choice and never grant access or approve an action
   its indexed branch is not evidence of an unindexed PR head.
 - For a requested new issue, use `propose_github_issue`. The requester reviews
   the complete title/body and approves in Telegram before publication.
+- For a requested new GitHub repository, use `propose_github_repository` when
+  registered. Default to `visibility: "private"` unless the user explicitly asks
+  for `public` or `internal`. Creation always requires a verified personal GitHub
+  account connection (`/github` in private chat) and explicit Telegram approval.
+  For a personal account installation, only that personal account owner can
+  create repositories (public or private). For a GitHub organization installation,
+  creation runs under the requester's verified GitHub account and follows the
+  organization's permission setup (including org owners, member repository
+  creation privileges and visibility restrictions). Private and internal repository
+  creation must be requested in a private Telegram chat. If the App installation
+  lacks `Repository creation: Read and write` (or `Administration: Read and write`),
+  explain the returned permission guidance clearly.
 - For a requested merge or close, use `propose_github_pull_request_action` when
   registered. Confirm repository, PR number and action; pass the requested merge
   method when specified. A clear current retry can refer to the preceding request,

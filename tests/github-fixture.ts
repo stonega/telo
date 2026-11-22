@@ -44,6 +44,7 @@ export function githubTransport(
             issues: "write",
             pull_requests: "write",
             members: "read",
+            repository_creation: "write",
           },
         },
         201,
@@ -104,7 +105,7 @@ export function githubTransport(
         app_id: 123,
         account: { id: 100, login: "example", type: "Organization" },
         suspended_at: null,
-        permissions: { members: "read" },
+        permissions: { members: "read", repository_creation: "write" },
       });
     if (url.startsWith("https://api.github.com/orgs/example/members?"))
       return json([

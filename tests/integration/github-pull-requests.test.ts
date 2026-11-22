@@ -291,6 +291,7 @@ const url = process.env.TEST_DATABASE_URL;
           "obsidian_write",
           "propose_github_issue",
           "propose_github_pull_request_action",
+          "propose_github_repository",
           "query_github_metadata",
           "query_github_pull_request",
         ].sort(),

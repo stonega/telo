@@ -463,6 +463,7 @@ export interface Approval {
     | "deletion"
     | "github_issue"
     | "github_pull_request"
+    | "github_repository"
     | "cloudflare_action"
     | "skill";
   target: string;
@@ -487,6 +488,14 @@ export interface Approval {
   pullRequest?: {
     state: "sending" | "merged" | "closed" | "failed" | "unknown";
     startedAt: string;
+    url?: string;
+    error?: string;
+  };
+  repository?: {
+    state: "sending" | "created" | "failed" | "unknown";
+    startedAt: string;
+    repositoryId?: number;
+    fullName?: string;
     url?: string;
     error?: string;
   };
