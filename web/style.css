@@ -4501,6 +4501,58 @@ fieldset.nowledge-fields > * {
   color: var(--ui-danger);
   border-color: var(--ui-danger-border);
 }
+.repo-queues-card {
+  display: grid;
+  gap: 14px;
+}
+.repo-queues-note {
+  margin: 0;
+}
+.repo-queue-section {
+  display: grid;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--ui-border);
+}
+.repo-queues-idle {
+  margin: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--ui-border);
+}
+.repo-queues-idle-summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  font-weight: 600;
+  color: var(--ui-accent);
+}
+.repo-queues-idle-summary:focus-visible {
+  outline: 3px solid var(--ui-focus);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+.repo-queues-idle-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+.repo-queue-idle-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--ui-border);
+}
+.repo-queue-idle-row:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+.repo-queue-idle-name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
 
 @media (max-width: 1024px) {
   .mu-charts-grid {

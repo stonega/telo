@@ -69,8 +69,10 @@ support:
 
 ## Per-repository task queues
 
-From **Missions → Repository task queues**, admins can inspect active and queued
-tasks per repository, **Pause** or **Resume** a queue, **Pin** an urgent queued
-item to the front, or **Cancel** an item. When a queued item is promoted, verified
-branch/PR summaries from the preceding completed item in the same visibility scope
-can carry over automatically as read-only context.
+From **Missions → Repository task queues**, admins can inspect active, queued,
+or paused repository queues, **Pause** or **Resume** a queue, **Pin** an urgent
+queued item to the front, or **Cancel** an item. Idle repositories stay
+collapsed under **Idle repositories** by default so busy or paused queues remain
+easy to scan. When a queued item is promoted, verified branch/PR summaries from
+the preceding completed item in the same visibility scope can carry over
+automatically as read-only context.

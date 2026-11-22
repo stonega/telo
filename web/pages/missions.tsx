@@ -336,7 +336,7 @@ export function MissionsPage({ id }: { id: string }) {
 
       {/* Per-Repository Task Queues Card */}
       <section
-        className="card"
+        className="card repo-queues-card"
         aria-label="Repository task queues"
         aria-busy={queues.loading}
       >
@@ -352,120 +352,172 @@ export function MissionsPage({ id }: { id: string }) {
         {queues.loading && !queues.data ? (
           <SkeletonRows label="Repository task queues" />
         ) : !queues.data?.items.length ? (
-          <p className="muted">No connected repository queues yet.</p>
+          <p className="muted repo-queues-note">
+            No connected repository queues yet.
+          </p>
         ) : (
-          queues.data.items.map((entry) => {
-            const { queue, running, queued } = entry;
-            const toggleAction = queue.paused ? "Resume queue" : "Pause queue";
-            return (
-              <div
-                key={queue.repositoryId}
-                className="repo-queue-section"
-                style={{
-                  paddingTop: "0.75rem",
-                  borderTop: "1px solid var(--border)",
-                }}
-              >
-                <div className="card-heading">
-                  <div className="row">
-                    <h3>{queue.repository}</h3>
-                    <span className={`pill${queue.paused ? "" : " good"}`}>
-                      {queue.paused ? "Paused" : "Active"}
-                    </span>
-                  </div>
-                  <Action
-                    onClick={async () => {
-                      await api(
-                        `/api/admin/workspaces/${id}/queues/${queue.repositoryId}/${queue.paused ? "resume" : "pause"}`,
-                        "POST",
-                        {},
-                      );
-                      notify(
-                        queue.paused
-                          ? `Resumed queue for ${queue.repository}.`
-                          : `Paused queue for ${queue.repository}.`,
-                      );
-                      queues.reload();
-                    }}
-                  >
-                    {toggleAction}
-                  </Action>
-                </div>
-                {running.length === 0 && queued.length === 0 ? (
-                  <p className="muted">Queue is idle.</p>
-                ) : (
-                  <div className="data-table-scroll">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Task</th>
-                          <th>Status</th>
-                          <th>Priority</th>
-                          <th className="actions-cell">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {[...running, ...queued].map((item) => (
-                          <tr key={item.id}>
-                            <td>
-                              {item.title}
-                              {item.carryover?.prUrl && (
-                                <small>
-                                  {" "}
-                                  · Carries over previous PR context
-                                </small>
-                              )}
-                            </td>
-                            <td>
-                              <span
-                                className={`pill${item.status === "running" ? " good" : ""}`}
-                              >
-                                {item.status}
-                              </span>
-                            </td>
-                            <td>{item.priority}</td>
-                            <td className="actions-cell">
-                              <div className="row">
-                                {item.status === "queued" && (
-                                  <Action
-                                    onClick={async () => {
-                                      await api(
-                                        `/api/admin/workspaces/${id}/queues/${queue.repositoryId}/items/${encodeURIComponent(item.id)}/pin`,
-                                        "POST",
-                                        {},
-                                      );
-                                      notify("Pinned task to front of queue.");
-                                      queues.reload();
-                                    }}
-                                  >
-                                    Pin
-                                  </Action>
-                                )}
-                                <Action
-                                  danger
-                                  onClick={async () => {
-                                    await api(
-                                      `/api/admin/workspaces/${id}/queues/${queue.repositoryId}/items/${encodeURIComponent(item.id)}/cancel`,
-                                      "POST",
-                                      {},
-                                    );
-                                    notify("Cancelled queued task.");
-                                    queues.reload();
-                                  }}
-                                >
-                                  Cancel
-                                </Action>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
+          (() => {
+            const visibleQueues = queues.data.items.filter(
+              (entry) =>
+                entry.queue.paused ||
+                entry.running.length > 0 ||
+                entry.queued.length > 0,
             );
-          })
+            const idleQueues = queues.data.items.filter(
+              (entry) =>
+                !entry.queue.paused &&
+                entry.running.length === 0 &&
+                entry.queued.length === 0,
+            );
+            const toggleQueue = async (entry: RepoQueueView) => {
+              const { queue } = entry;
+              await api(
+                `/api/admin/workspaces/${id}/queues/${queue.repositoryId}/${queue.paused ? "resume" : "pause"}`,
+                "POST",
+                {},
+              );
+              notify(
+                queue.paused
+                  ? `Resumed queue for ${queue.repository}.`
+                  : `Paused queue for ${queue.repository}.`,
+              );
+              queues.reload();
+            };
+            return (
+              <>
+                {visibleQueues.length === 0 ? (
+                  <p className="muted repo-queues-note">
+                    All repository queues are idle.
+                  </p>
+                ) : (
+                  visibleQueues.map((entry) => {
+                    const { queue, running, queued } = entry;
+                    const toggleAction = queue.paused
+                      ? "Resume queue"
+                      : "Pause queue";
+                    return (
+                      <div
+                        key={queue.repositoryId}
+                        className="repo-queue-section"
+                      >
+                        <div className="card-heading">
+                          <div className="row">
+                            <h3>{queue.repository}</h3>
+                            <span
+                              className={`pill${queue.paused ? "" : " good"}`}
+                            >
+                              {queue.paused ? "Paused" : "Active"}
+                            </span>
+                          </div>
+                          <Action onClick={() => toggleQueue(entry)}>
+                            {toggleAction}
+                          </Action>
+                        </div>
+                        {running.length === 0 && queued.length === 0 ? (
+                          <p className="muted repo-queues-note">
+                            Queue is idle.
+                          </p>
+                        ) : (
+                          <div className="data-table-scroll">
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th>Task</th>
+                                  <th>Status</th>
+                                  <th>Priority</th>
+                                  <th className="actions-cell">Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {[...running, ...queued].map((item) => (
+                                  <tr key={item.id}>
+                                    <td>
+                                      {item.title}
+                                      {item.carryover?.prUrl && (
+                                        <small>
+                                          {" "}
+                                          · Carries over previous PR context
+                                        </small>
+                                      )}
+                                    </td>
+                                    <td>
+                                      <span
+                                        className={`pill${item.status === "running" ? " good" : ""}`}
+                                      >
+                                        {item.status}
+                                      </span>
+                                    </td>
+                                    <td>{item.priority}</td>
+                                    <td className="actions-cell">
+                                      <div className="row">
+                                        {item.status === "queued" && (
+                                          <Action
+                                            onClick={async () => {
+                                              await api(
+                                                `/api/admin/workspaces/${id}/queues/${queue.repositoryId}/items/${encodeURIComponent(item.id)}/pin`,
+                                                "POST",
+                                                {},
+                                              );
+                                              notify(
+                                                "Pinned task to front of queue.",
+                                              );
+                                              queues.reload();
+                                            }}
+                                          >
+                                            Pin
+                                          </Action>
+                                        )}
+                                        <Action
+                                          danger
+                                          onClick={async () => {
+                                            await api(
+                                              `/api/admin/workspaces/${id}/queues/${queue.repositoryId}/items/${encodeURIComponent(item.id)}/cancel`,
+                                              "POST",
+                                              {},
+                                            );
+                                            notify("Cancelled queued task.");
+                                            queues.reload();
+                                          }}
+                                        >
+                                          Cancel
+                                        </Action>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+                {idleQueues.length > 0 && (
+                  <details className="repo-queues-idle">
+                    <summary className="repo-queues-idle-summary">
+                      Idle repositories ({idleQueues.length})
+                    </summary>
+                    <div className="repo-queues-idle-list">
+                      {idleQueues.map((entry) => (
+                        <div
+                          key={entry.queue.repositoryId}
+                          className="repo-queue-idle-row"
+                        >
+                          <span className="repo-queue-idle-name">
+                            {entry.queue.repository}
+                          </span>
+                          <Action onClick={() => toggleQueue(entry)}>
+                            Pause queue
+                          </Action>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </>
+            );
+          })()
         )}
       </section>
 

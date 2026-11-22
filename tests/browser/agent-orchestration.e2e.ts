@@ -97,6 +97,20 @@ async function mountOrchestrationFixture(page: Page) {
       ],
       recent: [],
     },
+    {
+      queue: {
+        workspaceId,
+        repositoryId: 1002,
+        repository: "acme/landing",
+        paused: false,
+        concurrency: 1,
+        revision: 0,
+        updatedAt: "2026-11-20T10:00:00.000Z",
+      },
+      running: [],
+      queued: [],
+      recent: [],
+    },
   ];
 
   let failNextAutonomySave = false;
@@ -224,27 +238,39 @@ async function mountOrchestrationFixture(page: Page) {
     if (path.endsWith("/queues")) {
       return route.fulfill({ json: { items: queues } });
     }
-    if (path.endsWith("/queues/1001/pause")) {
-      queues = queues.map((entry) => ({
-        ...entry,
-        queue: {
-          ...entry.queue,
-          paused: true,
-          revision: entry.queue.revision + 1,
-        },
-      }));
-      return route.fulfill({ json: { queue: queues[0]?.queue } });
+    if (path.includes("/queues/") && path.endsWith("/pause")) {
+      const repoId = Number(path.split("/").at(-2));
+      queues = queues.map((entry) =>
+        entry.queue.repositoryId === repoId
+          ? {
+              ...entry,
+              queue: {
+                ...entry.queue,
+                paused: true,
+                revision: entry.queue.revision + 1,
+              },
+            }
+          : entry,
+      );
+      const updated = queues.find((e) => e.queue.repositoryId === repoId);
+      return route.fulfill({ json: { queue: updated?.queue } });
     }
-    if (path.endsWith("/queues/1001/resume")) {
-      queues = queues.map((entry) => ({
-        ...entry,
-        queue: {
-          ...entry.queue,
-          paused: false,
-          revision: entry.queue.revision + 1,
-        },
-      }));
-      return route.fulfill({ json: { queue: queues[0]?.queue } });
+    if (path.includes("/queues/") && path.endsWith("/resume")) {
+      const repoId = Number(path.split("/").at(-2));
+      queues = queues.map((entry) =>
+        entry.queue.repositoryId === repoId
+          ? {
+              ...entry,
+              queue: {
+                ...entry.queue,
+                paused: false,
+                revision: entry.queue.revision + 1,
+              },
+            }
+          : entry,
+      );
+      const updated = queues.find((e) => e.queue.repositoryId === repoId);
+      return route.fulfill({ json: { queue: updated?.queue } });
     }
     if (path.endsWith("/queues/1001/items/q-2/pin")) {
       queues = queues.map((entry) => ({
@@ -268,6 +294,14 @@ async function mountOrchestrationFixture(page: Page) {
   return {
     setFailNextAutonomySave: (v: boolean) => {
       failNextAutonomySave = v;
+    },
+    setAllQueuesIdle: () => {
+      queues = queues.map((entry) => ({
+        ...entry,
+        queue: { ...entry.queue, paused: false },
+        running: [],
+        queued: [],
+      }));
     },
   };
 }
@@ -381,18 +415,36 @@ test("Missions & Orchestration separates saved autonomy display from modal edito
   await saveOverrideBtn.click();
   await expect(repoDialog).toBeHidden();
 
-  // Repository queue: single opposite-state Pause/Resume button + Pin + Cancel
+  // Repository queue: active queue visible, idle repo collapsed by default; single Pause/Resume + Pin
   const queueCard = page.locator(
     'section[aria-label="Repository task queues"]',
   );
   await expect(queueCard).toContainText("acme/backend");
-  await queueCard.getByRole("button", { name: "Pause queue" }).click();
+  const idleDetails = queueCard.locator("details.repo-queues-idle");
+  await expect(idleDetails).not.toHaveAttribute("open", "");
+  await expect(idleDetails.locator("summary")).toHaveText(
+    "Idle repositories (1)",
+  );
   await expect(
-    queueCard.getByRole("button", { name: "Resume queue" }),
+    queueCard.locator(".repo-queue-idle-name", { hasText: "acme/landing" }),
+  ).toBeHidden();
+  await queueCard
+    .locator(".repo-queue-section")
+    .getByRole("button", { name: "Pause queue" })
+    .click();
+  await expect(
+    queueCard
+      .locator(".repo-queue-section")
+      .getByRole("button", { name: "Resume queue" }),
   ).toBeVisible();
-  await queueCard.getByRole("button", { name: "Resume queue" }).click();
+  await queueCard
+    .locator(".repo-queue-section")
+    .getByRole("button", { name: "Resume queue" })
+    .click();
   await expect(
-    queueCard.getByRole("button", { name: "Pause queue" }),
+    queueCard
+      .locator(".repo-queue-section")
+      .getByRole("button", { name: "Pause queue" }),
   ).toBeVisible();
 
   await queueCard.getByRole("button", { name: "Pin" }).click();
@@ -405,6 +457,89 @@ test("Missions & Orchestration separates saved autonomy display from modal edito
   });
   await expect(autonomyCard).toBeVisible();
   await expect(missionsCard).toBeVisible();
+  await expect(queueCard).toBeVisible();
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth + 2,
+  );
+  expect(overflow).toBe(false);
+});
+
+test("Repository task queues collapses idle repositories and promotes paused queues across desktop and mobile", async ({
+  page,
+}) => {
+  const ctl = await mountOrchestrationFixture(page);
+  ctl.setAllQueuesIdle();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(`/admin/missions?workspace=${workspaceId}`);
+
+  const queueCard = page.locator(
+    'section[aria-label="Repository task queues"]',
+  );
+  await expect(queueCard).toContainText("All repository queues are idle.");
+  await expect(queueCard.locator(".repo-queue-section")).toHaveCount(0);
+
+  const idleDetails = queueCard.locator("details.repo-queues-idle");
+  await expect(idleDetails).not.toHaveAttribute("open", "");
+  await expect(idleDetails.locator("summary")).toHaveText(
+    "Idle repositories (2)",
+  );
+  await expect(
+    queueCard.locator(".repo-queue-idle-name", { hasText: "acme/landing" }),
+  ).toBeHidden();
+
+  // Verify card bottom edge has no leftover paragraph/details margin
+  const collapsedSpacing = await queueCard.evaluate((el) => {
+    const cardRect = el.getBoundingClientRect();
+    const padBottom = parseFloat(getComputedStyle(el).paddingBottom);
+    const lastChild = el.lastElementChild?.getBoundingClientRect();
+    return {
+      padBottom,
+      gap: lastChild ? Math.round(cardRect.bottom - lastChild.bottom) : -1,
+    };
+  });
+  expect(
+    Math.abs(collapsedSpacing.gap - collapsedSpacing.padBottom),
+  ).toBeLessThanOrEqual(2);
+
+  // Expand idle disclosure and pause acme/landing -> promotes into main list
+  await idleDetails.locator("summary").click();
+  await expect(idleDetails).toHaveAttribute("open", "");
+  const landingRow = queueCard.locator(".repo-queue-idle-row", {
+    hasText: "acme/landing",
+  });
+  await expect(landingRow).toBeVisible();
+  await landingRow.getByRole("button", { name: "Pause queue" }).click();
+
+  await expect(queueCard.locator(".repo-queue-section")).toHaveCount(1);
+  await expect(queueCard.locator(".repo-queue-section")).toContainText(
+    "acme/landing",
+  );
+  await expect(queueCard.locator(".repo-queue-section")).toContainText(
+    "Paused",
+  );
+  await expect(queueCard.locator(".repo-queue-section")).toContainText(
+    "Queue is idle.",
+  );
+  await expect(idleDetails.locator("summary")).toHaveText(
+    "Idle repositories (1)",
+  );
+
+  // Resume returns acme/landing to the idle disclosure and restores all-idle summary
+  await queueCard
+    .locator(".repo-queue-section")
+    .getByRole("button", { name: "Resume queue" })
+    .click();
+  await expect(queueCard).toContainText("All repository queues are idle.");
+  await expect(queueCard.locator(".repo-queue-section")).toHaveCount(0);
+  await expect(idleDetails.locator("summary")).toHaveText(
+    "Idle repositories (2)",
+  );
+
+  // Mobile 390px + dark theme overflow and card spacing check
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => {
+    document.documentElement.dataset.theme = "dark";
+  });
   await expect(queueCard).toBeVisible();
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth + 2,
