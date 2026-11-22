@@ -83,6 +83,13 @@ for (const width of [1280, 390]) {
         name: "3 coding tasks. View details",
       });
       await expect(card).toBeVisible();
+      await card.hover();
+      expect(
+        await card.evaluate((el) => ({
+          before: getComputedStyle(el, "::before").content,
+          after: getComputedStyle(el, "::after").content,
+        })),
+      ).toEqual({ before: "none", after: "none" });
       await expect(card).toHaveAttribute(
         "href",
         `/admin/plugins/codex?workspace=${w.id}#coding-tasks`,
@@ -91,6 +98,19 @@ for (const width of [1280, 390]) {
       await page.screenshot({
         path: test.info().outputPath("overview-coding-count.png"),
         fullPage: true,
+      });
+      await page.emulateMedia({ colorScheme: "dark" });
+      await page.evaluate(() => {
+        document.documentElement.dataset.theme = "dark";
+      });
+      await card.hover();
+      await page.screenshot({
+        path: test.info().outputPath("overview-coding-count-dark.png"),
+        fullPage: true,
+      });
+      await page.emulateMedia({ colorScheme: "light" });
+      await page.evaluate(() => {
+        delete document.documentElement.dataset.theme;
       });
       await card.click();
       await expect(page).toHaveURL(

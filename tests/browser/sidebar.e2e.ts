@@ -206,6 +206,14 @@ test("desktop keeps the persistent sidebar and bottom-right version", async ({
   await fixture(page);
   await page.goto("/admin/operations");
   await expect(page.locator("aside")).toBeVisible();
+  const activeNav = page.locator("nav a.active");
+  await expect(activeNav).toHaveCount(1);
+  expect(
+    await activeNav.evaluate((el) => ({
+      before: getComputedStyle(el, "::before").content,
+      after: getComputedStyle(el, "::after").content,
+    })),
+  ).toEqual({ before: "none", after: "none" });
   await expect(
     page.getByRole("button", { name: "Open navigation" }),
   ).toHaveCount(0);

@@ -23,6 +23,7 @@ when implementing or reviewing a change.
 | Browser site consent and task continuity | [Remember websites and keep Pi in control](#browser-remembers-websites-and-stays-in-the-current-pi-task) |
 | Code Truth setup | [URL and description](#code-truth-repositories-use-a-url-and-description) |
 | Card spacing after content changes | [Content layout owns card spacing](#content-layout-owns-card-spacing) |
+| Active & hover highlights | [Avoid decorative accent bars and gradient edge stripes](#avoid-decorative-accent-bars-and-gradient-edge-stripes) |
 | Repository display | [Shared repository cards](#repository-cards-share-one-style), [member GitHub details](#member-github-columns-show-only-a-view-button), [connected repositories](#connected-github-repositories-stay-compact-and-directly-accessible) |
 | Action labels and controls | [One action for opposite settings](#opposite-setting-actions-share-one-button), [card action placement](#card-actions-stay-at-the-top-right), [Edit/New labels](#edit-and-add-buttons-use-short-labels), [shared icons](#common-action-buttons-use-reicon), [dropdown styling](#dropdown-inputs-share-the-workspace-selector-style), [checkbox styling](#admin-checkboxes-share-a-clear-comfortable-style) |
 | Dialog actions | [Cancel order](#modal-cancel-follows-the-primary-action), [close controls](#modal-close-controls-use-a-plain-x), [secondary actions](#dialog-support-actions-use-secondary-buttons) |
@@ -42,6 +43,29 @@ when implementing or reviewing a change.
 - Keep illustrative examples separate from established preferences.
 
 ## Recorded preferences
+
+### Avoid decorative accent bars and gradient edge stripes
+
+- **Preference:** Do not add decorative top/side accent stripes, pill edge bars,
+  or gradient highlight strips on cards, stat tiles, or active navigation items
+  (such as `::before` colored bars clipped along rounded corners). Indicate
+  active and hover states with clean surface fills, typography weight, and
+  understated borders/shadows instead.
+- **Scope:** Admin panel navigation items, overview stat cards, and comparable
+  interactive cards or list items across desktop and mobile widths in both light
+  and dark themes.
+- **Source:** 2026-11-22 — user shared screenshots of the gradient top bar on
+  Overview stat cards and the left accent stripe on the active `Overview` nav
+  item and requested avoiding those highlights ("too ai slop").
+- **Acceptance:** Active navigation items show a clean tinted surface and bold
+  label with no `::before`/`::after` edge bar. Hovering or focusing Overview
+  stat cards uses a restrained border/shadow transition with no top accent bar.
+  Setup step number badges use solid theme tokens (`--ui-accent` /
+  `--ui-on-accent`) rather than a multi-stop gradient. Verify rendered light and
+  dark themes at desktop and mobile widths.
+- **Exceptions:** Functional focus outlines (`:focus-visible`), semantic status
+  indicators (such as update dots), structural dividers between sections, and
+  data-visualization chart fills remain unaffected.
 
 ### Browser follow-ups preserve one task and show its actual wait
 

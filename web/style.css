@@ -10,7 +10,6 @@
   --ui-accent-soft: #fff1e3;
   --ui-accent-soft-hover: #ffe5cc;
   --ui-accent-border: #f5cfb0;
-  --ui-accent-gradient: linear-gradient(135deg, #ffa348 0%, #f27242 100%);
   --ui-on-accent: #fff;
   --ui-border: #e7dfd5;
   --ui-border-subtle: #efe8df;
@@ -69,7 +68,6 @@
   --ui-accent-soft: #332217;
   --ui-accent-soft-hover: #422b1c;
   --ui-accent-border: #613d24;
-  --ui-accent-gradient: linear-gradient(135deg, #ffc46b 0%, #f27c44 100%);
   --ui-on-accent: #1d1008;
   --ui-border: #362f2a;
   --ui-border-subtle: #2c2622;
@@ -712,7 +710,6 @@ nav {
   gap: 3px;
 }
 nav a {
-  position: relative;
   color: var(--ui-nav-text);
   text-decoration: none;
   padding: 10px 13px;
@@ -724,17 +721,6 @@ nav a.active {
   background: var(--ui-accent-soft);
   color: var(--ui-accent-hover);
   font-weight: 650;
-  box-shadow: inset 0 0 0 1px var(--ui-accent-border);
-}
-nav a.active::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 9px;
-  bottom: 9px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--ui-accent-gradient);
 }
 nav a:hover {
   background: var(--ui-surface-muted);
@@ -1588,8 +1574,8 @@ button.github-repository-more:hover:not(:disabled) {
   font-weight: 700;
 }
 .setup-step.current .setup-step-number {
-  background: var(--ui-accent-gradient);
-  color: #fff;
+  background: var(--ui-accent);
+  color: var(--ui-on-accent);
 }
 .setup-step-copy {
   display: grid;
@@ -1664,8 +1650,6 @@ button.github-repository-more:hover:not(:disabled) {
   margin-top: 20px;
 }
 .stats a {
-  position: relative;
-  overflow: hidden;
   background: var(--ui-surface);
   border: 1px solid var(--ui-border);
   border-radius: var(--ui-radius);
@@ -1676,24 +1660,11 @@ button.github-repository-more:hover:not(:disabled) {
     box-shadow 150ms ease,
     transform 150ms ease;
 }
-.stats a::before {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto;
-  height: 3px;
-  background: var(--ui-accent-gradient);
-  opacity: 0;
-  transition: opacity 150ms ease;
-}
 .stats a:hover,
 .stats a:focus-visible {
-  border-color: var(--ui-accent-border);
+  border-color: var(--ui-border-hover);
   box-shadow: var(--ui-shadow-card-hover);
   transform: translateY(-1px);
-}
-.stats a:hover::before,
-.stats a:focus-visible::before {
-  opacity: 1;
 }
 .stats strong {
   display: block;
@@ -4547,7 +4518,6 @@ fieldset.nowledge-fields > * {
   .dropdown-trigger::after,
   .run-card,
   .stats a,
-  .stats a::before,
   .plugin-catalog-card {
     transition: none;
   }
