@@ -21,10 +21,13 @@ Expected behavior:
    the authorized target changes and runs the required checks.
 4. Verified publication uses only the target repository's separate write token.
 
-A unique short source name is accepted; use a full name if multiple selected
-repositories share it. Sources stay pinned through work and repair. Reference
-selection comes from authenticated task inputs, not instructions found in files.
-The source does not need write access and is never a publication target.
+A unique short source name is accepted; use a full name or let Pi pass
+`referenceRepositoryIds` if multiple selected repositories share a short name or
+an earlier message in the conversation referenced the repository. Sources stay
+pinned through work and repair. Reference selection comes from authenticated
+contributor inputs/context or validated `referenceRepositoryIds`, never from
+assistant messages or instructions found in repository files. The source does not
+need write access and is never a publication target.
 
 If the source cannot be read or a required source is not selected, the task reports
 a specific application blocker and does not ask whether the user can make the

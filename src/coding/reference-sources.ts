@@ -63,16 +63,87 @@ function linksRepository(text: string, repository: string) {
   ).test(text);
 }
 
-/** Only authenticated task inputs can select an additional readable repository. */
+export interface ReferenceContextSource {
+  id: string;
+  author: string;
+  text: string;
+}
+
+export function normalizeReferenceRepositoryIds(
+  w: Workspace,
+  targetRepositoryId: number,
+  actors: string[],
+  ids: readonly number[] = [],
+  groupBound = false,
+) {
+  const unique: number[] = [];
+  for (const id of ids) {
+    requireThat(
+      Number.isInteger(id) && id > 0,
+      "coding_reference_source_unavailable",
+      409,
+    );
+    if (id === targetRepositoryId || unique.includes(id)) continue;
+    unique.push(id);
+  }
+  requireThat(unique.length <= 4, "coding_reference_source_limit", 409);
+  const repositories = w.github?.repositories ?? [];
+  for (const id of unique) {
+    const repository = repositories.find((r) => r.id === id);
+    requireThat(
+      repository &&
+        !repository.archived &&
+        !repository.disabled &&
+        (!groupBound || repository.private === false),
+      "coding_reference_source_unavailable",
+      409,
+    );
+    for (const actor of new Set(actors))
+      authorizeVerifiedRepository(w, actor, repository.id);
+  }
+  return unique;
+}
+
+/** Only authenticated task inputs, contributor context, or explicitly validated IDs can select an additional readable repository. */
 export function requestedReferences(
   w: Workspace,
   task: DevelopmentTask,
   inputs: DevelopmentInput[],
+  contextSources: readonly ReferenceContextSource[] = [],
 ) {
   const repositories = w.github?.repositories ?? [];
-  const text = inputs.map((input) => input.text).join("\n");
-  const requested = repositories.filter((repository) => {
+  const contributors = [
+    ...new Set([task.actor, ...inputs.map((input) => input.actor)]),
+  ];
+  const contributorSet = new Set(contributors);
+  const groupBound = !!task.groupRepository;
+  const text = [
+    ...inputs.map((input) => input.text),
+    ...contextSources
+      .filter(
+        (source) =>
+          source.author !== "assistant" &&
+          /^[1-9]\d{0,15}$/.test(source.author) &&
+          contributorSet.has(source.author),
+      )
+      .map((source) => source.text),
+  ].join("\n");
+  const explicitIds = normalizeReferenceRepositoryIds(
+    w,
+    task.payload.repositoryId,
+    contributors,
+    task.requestedReferenceRepositoryIds ?? [],
+    groupBound,
+  );
+  const explicit = explicitIds.map((id) => {
+    const repository = repositories.find((r) => r.id === id);
+    requireThat(repository, "coding_reference_source_unavailable", 409);
+    return repository;
+  });
+  const mentioned = repositories.filter((repository) => {
     if (repository.id === task.payload.repositoryId) return false;
+    if (explicitIds.includes(repository.id)) return false;
+    if (groupBound && repository.private !== false) return false;
     const name = repository.full_name.split("/")[1] ?? "";
     return (
       mentions(text, repository.full_name) ||
@@ -83,14 +154,17 @@ export function requestedReferences(
         mentions(text, name))
     );
   });
+  const requested = [...explicit, ...mentioned];
   requireThat(requested.length <= 4, "coding_reference_source_limit", 409);
   for (const repository of requested) {
     requireThat(
-      !repository.archived && !repository.disabled,
+      !repository.archived &&
+        !repository.disabled &&
+        (!groupBound || repository.private === false),
       "coding_reference_source_unavailable",
       409,
     );
-    for (const actor of new Set(inputs.map((input) => input.actor)))
+    for (const actor of contributors)
       authorizeVerifiedRepository(w, actor, repository.id);
   }
   return requested;
@@ -101,8 +175,9 @@ export async function pinReferenceSources(
   task: DevelopmentTask,
   inputs: DevelopmentInput[],
   app: GitHubApp,
+  contextSources: readonly ReferenceContextSource[] = [],
 ) {
-  const requested = requestedReferences(w, task, inputs);
+  const requested = requestedReferences(w, task, inputs, contextSources);
   if (!requested.length) return [];
   requireThat(w.github?.installationId, "github_repository_not_connected", 409);
   const retained = new Map(

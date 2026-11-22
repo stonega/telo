@@ -92,6 +92,8 @@ export function codingExtension(
       "coding_repository_target_ambiguous",
       "coding_repository_target_mismatch",
       "coding_repository_replacement_unsafe",
+      "coding_reference_source_unavailable",
+      "coding_reference_source_limit",
       "coding_task_conflict",
       "group_repository_changed",
       "group_repository_target_mismatch",
@@ -179,7 +181,7 @@ export function codingExtension(
         pi.registerTool({
           name: "start_development_task",
           label: `Start continuous ${defaultEngineLabel} task`,
-          description: `Start a repository task for implementation, an explicit coding investigation, or an engineering release/prepare-release request. Enabled coding engines: ${JSON.stringify(enabledEngines)}. Pass engine="antigravity" when the user asks to use Antigravity CLI (agy) or when Antigravity CLI is the enabled coding plugin, and engine="codex" for Codex; if omitted, the sole enabled engine is selected (defaulting to codex when both are enabled). Use objective.kind=release for repository release procedures and objective.kind=investigation for read-only technical work; these objectives are available by default for selected repositories unless explicitly disabled. The coding agent reads project release instructions itself; Pi does not invent the procedure. Website browsing, sign-in and browser automation belong to the current Pi conversation using Browser tools; they do not by themselves require a separate coding task. Handle ordinary conversation, explanations, status and PR review with the assistant's available read tools. An existing task in this topic does not authorize another coding turn. Use query_work_handoff to resolve an existing task before starting new work; send_development_input continues changes to that task/PR and can correct an unchanged task's repository. Relay the authenticated GitHub collaborator's ORIGINAL received message. The coding agent owns technical decisions and necessary product questions within the coding task. Do not write a technical plan or issue body. Distinguish the repository to MODIFY from repositories supplying documentation, examples or other reference material. The application can prepare commit-pinned references from other workspace-selected repositories named in authenticated task inputs when every contributor has verified read access. Do not claim pinning is unavailable or propose an unpinned fallback without checking the actual task state. Missing source/environment prerequisites are application blockers, not requests for another user confirmation. For 'add docs to product-land using https://github.com/acme/product/blob/main/docs/README.md', resolve product-land to the connected landing repository; the linked product docs are a reference source. Quote the target name in targetRepository and match its repositoryId. Resolve an unambiguous abbreviation against accessible repositories; ask one plain-language target question only if it remains ambiguous. A target validation failure creates no task: correct the selection rather than retrying the same wrong ID. Source IDs must include this run's request. If github_user_connection_required is returned, use manage_telegram to start their GitHub connection in this bot's private chat when they request it. They follow the authorization link, return to confirm the account, then resend their coding request. For a group request, ask them to connect GitHub in private using ordinary language. Accessible repositories: ${JSON.stringify(accessibleTargets)}.`,
+          description: `Start a repository task for implementation, an explicit coding investigation, or an engineering release/prepare-release request. Enabled coding engines: ${JSON.stringify(enabledEngines)}. Pass engine="antigravity" when the user asks to use Antigravity CLI (agy) or when Antigravity CLI is the enabled coding plugin, and engine="codex" for Codex; if omitted, the sole enabled engine is selected (defaulting to codex when both are enabled). Use objective.kind=release for repository release procedures and objective.kind=investigation for read-only technical work; these objectives are available by default for selected repositories unless explicitly disabled. The coding agent reads project release instructions itself; Pi does not invent the procedure. Website browsing, sign-in and browser automation belong to the current Pi conversation using Browser tools; they do not by themselves require a separate coding task. Handle ordinary conversation, explanations, status, complaints about a failed task, and PR review with the assistant's available read tools; do not start a new coding task unless the user explicitly asks to implement, investigate, or release. An existing task in this topic does not authorize another coding turn. Use query_work_handoff to resolve an existing task before starting new work; send_development_input continues changes to that task/PR and can correct an unchanged task's repository. Relay the authenticated GitHub collaborator's ORIGINAL received message. The coding agent owns technical decisions and necessary product questions within the coding task. Do not write a technical plan or issue body. Distinguish the repository to MODIFY from repositories supplying documentation, examples, sibling projects or other reference material. Whenever the user wants to reference, mirror, port or copy from another connected repository (including one named earlier in the conversation or with minor spelling differences), pass its numeric repository ID in referenceRepositoryIds (use find_connected_repository if needed) so the application prepares a commit-pinned read-only checkout before coding starts. Do not claim pinning is unavailable or propose an unpinned fallback without checking the actual task state. Missing source/environment prerequisites are application blockers, not requests for another user confirmation. For 'add docs to product-land using https://github.com/acme/product/blob/main/docs/README.md', resolve product-land to the connected landing repository and pass acme/product's repository ID in referenceRepositoryIds. Quote the target name in targetRepository and match its repositoryId. Resolve an unambiguous abbreviation against accessible repositories; ask one plain-language target question only if it remains ambiguous. A target validation failure creates no task: correct the selection rather than retrying the same wrong ID. Source IDs must include this run's request. If github_user_connection_required is returned, use manage_telegram to start their GitHub connection in this bot's private chat when they request it. They follow the authorization link, return to confirm the account, then resend their coding request. For a group request, ask them to connect GitHub in private using ordinary language. Accessible repositories: ${JSON.stringify(accessibleTargets)}.`,
           parameters: Type.Object({
             engine: Type.Optional(
               Type.Union([Type.Literal("codex"), Type.Literal("antigravity")]),
@@ -210,12 +212,24 @@ export function codingExtension(
               description:
                 "Copy the human's name/owner-name for the repository to MODIFY verbatim, e.g. product-land. If the human says product, use product even when the connected repository is acme/product; do not expand the quote to acme/product. Do not quote a documentation URL or reference source. Use an empty string only when the target is implicit in retained conversation context.",
             }),
+            referenceRepositoryIds: Type.Optional(
+              Type.Array(Type.Integer(), {
+                maxItems: 4,
+                description:
+                  "Optional connected repository IDs to attach as read-only reference checkouts (e.g. a sibling project, template, or docs repository mentioned in the conversation). Never include the modification target repositoryId here; use find_connected_repository to look up readable repository IDs when needed.",
+              }),
+            ),
             sourceIds: Type.Array(Type.String(), { minItems: 1, maxItems: 10 }),
           }),
           execute: async (_id, args) =>
             operate(async (w, sql) => {
               const deployment = await store.deployment(sql);
               requireThat(deployment.bot, "bot_not_configured", 409);
+              const referenceRepositoryIds = Array.isArray(
+                args.referenceRepositoryIds,
+              )
+                ? (args.referenceRepositoryIds as unknown[]).map(Number)
+                : undefined;
               const task = await startDevelopment(
                 sql,
                 w,
@@ -227,14 +241,26 @@ export function codingExtension(
                 String(args.targetRepository ?? ""),
                 args.objective as RepositoryObjective | undefined,
                 args.engine as CodingEngine | undefined,
+                referenceRepositoryIds,
               );
               const label = codingEngineLabel(task.payload);
+              const referenceRepositories = (
+                task.requestedReferenceRepositoryIds ?? []
+              )
+                .map(
+                  (id) =>
+                    w.github?.repositories.find((r) => r.id === id)?.full_name,
+                )
+                .filter((name): name is string => !!name);
               return {
                 taskId: task.id,
                 engine: task.payload.engine ?? "codex",
                 state: task.state,
                 repository: task.payload.repository,
                 baseBranch: task.payload.baseBranch,
+                ...(referenceRepositories.length
+                  ? { referenceRepositories }
+                  : {}),
                 message:
                   task.state === "queued" && !task.cancelRequested
                     ? `Original request queued for ${label}. Do not add technical decisions or invent completion.`
@@ -273,6 +299,13 @@ export function codingExtension(
             description:
               "Quote the human's explicit modification target verbatim, or an empty string for an implicit continuation. A corrected repository requires a nonempty quote from this message.",
           }),
+          referenceRepositoryIds: Type.Optional(
+            Type.Array(Type.Integer(), {
+              maxItems: 4,
+              description:
+                "Optional connected repository IDs to add as read-only reference checkouts for this continuation.",
+            }),
+          ),
         }),
         execute: async (_id, args) =>
           operate(async (w, sql) => {
@@ -287,6 +320,11 @@ export function codingExtension(
               "coding_current_request_required",
               409,
             );
+            const referenceRepositoryIds = Array.isArray(
+              args.referenceRepositoryIds,
+            )
+              ? (args.referenceRepositoryIds as unknown[]).map(Number)
+              : undefined;
             if (
               args.repositoryId !== undefined &&
               Number(args.repositoryId) !== task.payload.repositoryId
@@ -307,6 +345,7 @@ export function codingExtension(
                 source.id,
                 task.botId,
                 String(args.targetRepository ?? ""),
+                referenceRepositoryIds,
               );
             } else {
               requireRepositoryTarget(
@@ -322,6 +361,7 @@ export function codingExtension(
                 input.actor,
                 source,
                 `${source.id}:relay`,
+                referenceRepositoryIds,
               );
             }
             run.codingTaskId = task.id;

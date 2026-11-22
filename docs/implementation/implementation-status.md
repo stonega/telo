@@ -5,6 +5,24 @@ Historical verification logs are archived by month to keep this active status le
 - [October 2026 archive](archive/implementation-status-2026-10.md) (125 entries)
 - [September 2026 baseline archive](archive/implementation-status-2026-09.md) (32 entries)
 
+## Explicit reference repositories and multi-turn context resolution for coding tasks (2026-11-22)
+
+Fixed reference-repository attachment for multi-turn coding requests and repository-name typos with zero new runtime dependencies or database migrations:
+
+1. **Explicit `referenceRepositoryIds` & contributor context scanning (`src/coding/reference-sources.ts`, `src/coding/tasks.ts`, `src/coding/executor.ts`, `src/coding/extension.ts`, `src/coding/development.ts`, `src/browser/privacy.ts`)**:
+   - Added optional `referenceRepositoryIds` (up to 4 connected readable repositories) to `start_development_task` and `send_development_input`, persisted on `DevelopmentTask.requestedReferenceRepositoryIds`, carried across `correctDevelopmentRepository`, and cleared on privacy redaction/pruning.
+   - Updated `DevelopmentExecutor.prepareReferences` and `requestedReferences` to also scan contributor-authored messages saved in the task's `context` event (excluding `assistant` and non-contributor messages) so short confirmation turns (such as `"开始！"`) resolve reference repositories named earlier in the conversation.
+   - Preserved read-only permission boundaries: every reference repository is validated against workspace selection, archived/disabled flags, group-bound public-only rules, and live `authorizeVerifiedRepository` read access for all contributors.
+2. **Clearer user-facing messaging & prompt wording (`src/coding/failure-messages.ts`, `src/coding/development.ts`, `src/coding/extension.ts`)**:
+   - Updated `coding_reference_source_unavailable` to distinguish unattached vs. unreadable reference repositories without exposing internal "snapshot" jargon, instructed Codex to use plain repository names in user-facing summaries/questions, and clarified that complaints or status discussions about failed tasks do not authorize starting a new coding task.
+
+Local verification on Bun 1.4.4, Node 22.22.3, and disposable PostgreSQL 17:
+
+- `bun run check` (only the nine pre-existing incident-script warnings), `bun run typecheck`, `bun run build`, `bun run test:runtime` (16 ordinary + 16 configured startup cases, **zero external startup calls**), and `compose.yaml` validation pass.
+- Full unit suite (`bun test tests/unit`): **1,010 passed, 9 Docker-gated skips, 0 failures** (6,055 assertions), including expanded `tests/unit/coding-reference-sources.test.ts`.
+- Selected PostgreSQL integration suites (`development.test.ts`, `coding.test.ts`, `antigravity.test.ts`): **140 passed, 0 failures** (1,105 assertions), including multi-turn context, typo + explicit `referenceRepositoryIds`, follow-up additions, and denied-access rejection.
+- Browser tests were not run because no `web/` source, dependencies, or UI behavior changed.
+
 ## GitHub repository creation for personal accounts and organizations (2026-11-22)
 
 Added Telegram-approved GitHub repository creation (`propose_github_repository`) with zero new runtime dependencies or database migrations:

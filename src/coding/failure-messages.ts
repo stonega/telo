@@ -31,7 +31,7 @@ const messages: Record<string, string> = {
   coding_github_source_unavailable:
     "A GitHub instruction could not be verified. Telo will retry automatically; execution and PR publication wait until its source is verified.",
   coding_reference_source_unavailable:
-    "A required reference repository snapshot is unavailable. Ask the workspace administrator to check the selected source repository and its read permissions before a new request. Repeating your confirmation cannot prepare the missing source.",
+    "A required reference repository was not attached or could not be read. Start a new request naming the full reference repository (owner/repo), or ask the workspace administrator to check its connection and read permissions. Repeating confirmation on this task cannot attach the missing repository.",
   coding_reference_source_changed:
     "A reference repository connection or permission changed. Ask the workspace administrator to check source access before a new request.",
   coding_reference_source_limit:

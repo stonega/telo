@@ -41,7 +41,10 @@ import {
   versionMentioned,
 } from "./objective.ts";
 import { checkCodingPayload, codingDestination } from "./policy.ts";
-import { checkReferenceSources } from "./reference-sources.ts";
+import {
+  checkReferenceSources,
+  normalizeReferenceRepositoryIds,
+} from "./reference-sources.ts";
 import { requireRepositoryTarget } from "./repository-target.ts";
 import {
   taskEvent,
@@ -216,6 +219,7 @@ export async function startDevelopment(
   targetRepository = "",
   objective?: RepositoryObjective,
   requestedEngine?: CodingEngine,
+  referenceRepositoryIds?: number[],
 ) {
   const run = w.runs.find((r) => r.id === runId);
   requireThat(run, "not_found", 404);
@@ -275,6 +279,13 @@ export async function startDevelopment(
       .map((s) => s.text),
     targetRepository,
   );
+  const requestedReferenceIds = normalizeReferenceRepositoryIds(
+    w,
+    repositoryId,
+    [actor],
+    referenceRepositoryIds,
+    !!run.groupRepository,
+  );
   const prior = await sql.query(
     "SELECT task_id FROM coding_task_inputs WHERE workspace_id=$1 AND source_key=$2",
     [w.id, `${source.id}:initial`],
@@ -282,7 +293,10 @@ export async function startDevelopment(
   if (prior.rows[0]) {
     const task = await taskGet(sql, w.id, prior.rows[0].task_id);
     requireThat(
-      task.actor === actor && task.payload.repositoryId === repositoryId,
+      task.actor === actor &&
+        task.payload.repositoryId === repositoryId &&
+        fingerprint(task.requestedReferenceRepositoryIds ?? []) ===
+          fingerprint(requestedReferenceIds),
       "coding_task_conflict",
       409,
     );
@@ -323,6 +337,9 @@ export async function startDevelopment(
     groupRepositoryVersion: run.groupRepositoryVersion,
     ...(objective ? { objective } : {}),
     ...(run.browserRead ? { browserRead: run.browserRead } : {}),
+    ...(requestedReferenceIds.length
+      ? { requestedReferenceRepositoryIds: requestedReferenceIds }
+      : {}),
     id: randomUUID(),
     workspaceId: w.id,
     actor,
@@ -421,6 +438,7 @@ export async function correctDevelopmentRepository(
   sourceId: string,
   botId: string,
   targetRepository: string,
+  referenceRepositoryIds?: number[],
 ) {
   const run = w.runs.find((r) => r.id === runId);
   requireThat(run, "run_revoked", 409);
@@ -533,6 +551,10 @@ export async function correctDevelopmentRepository(
       delivery.state = "cancelled";
   await taskSave(sql, task);
   // Both writes share the workspace transaction: a failed start rolls back the stop.
+  const replacementReferences = [
+    ...(task.requestedReferenceRepositoryIds ?? []),
+    ...(referenceRepositoryIds ?? []),
+  ].filter((id) => id !== repositoryId);
   const replacement = await startDevelopment(
     sql,
     w,
@@ -544,6 +566,7 @@ export async function correctDevelopmentRepository(
     targetRepository,
     undefined,
     codingEngineOf(task.payload),
+    replacementReferences.length ? replacementReferences : undefined,
   );
   requireThat(
     replacement.id !== task.id && !replacement.replacesTaskId,
@@ -593,6 +616,7 @@ export async function appendDevelopment(
   actor: string,
   source: Source,
   sourceKey: string,
+  referenceRepositoryIds?: number[],
 ) {
   checkDevelopment(w, task, actor);
   requireThat(!developmentStopped(task.state), "coding_task_stopped", 409);
@@ -627,6 +651,22 @@ export async function appendDevelopment(
     return task;
   }
   requireThat(task.revision < 100, "coding_input_capacity", 429);
+  if (referenceRepositoryIds?.length) {
+    const mergedReferences = normalizeReferenceRepositoryIds(
+      w,
+      task.payload.repositoryId,
+      [task.actor, actor],
+      [
+        ...(task.requestedReferenceRepositoryIds ?? []),
+        ...(task.referenceSources?.map((s) => s.repositoryId) ?? []),
+        ...referenceRepositoryIds,
+      ],
+      !!task.groupRepository,
+    );
+    task.requestedReferenceRepositoryIds = mergedReferences.length
+      ? mergedReferences
+      : undefined;
+  }
   const answering = task.state === "waiting" && !!task.question;
   task.browserRead ??=
     source.browserRead ??
@@ -901,6 +941,7 @@ export async function pruneDevelopment(sql: Sql, w: Workspace) {
     task.pendingObjective = undefined;
     task.objective = undefined;
     task.releasePrerequisite = undefined;
+    task.requestedReferenceRepositoryIds = undefined;
     task.referenceSources = undefined;
     task.pullBinding = undefined;
     task.question = undefined;

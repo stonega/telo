@@ -234,7 +234,20 @@ export class DevelopmentExecutor {
   ) {
     const w = await this.store.read(task.workspaceId);
     const inputs = await taskInputs(this.store.pool, task);
-    const sources = await pinReferenceSources(w, task, inputs, app);
+    const contextSources =
+      (
+        await this.store.pool.query(
+          "SELECT data FROM coding_task_events WHERE workspace_id=$1 AND task_id=$2 AND id='context'",
+          [task.workspaceId, task.id],
+        )
+      ).rows[0]?.data?.sources ?? [];
+    const sources = await pinReferenceSources(
+      w,
+      task,
+      inputs,
+      app,
+      contextSources,
+    );
     const accepted = await this.update(
       task,
       lease,

@@ -12,6 +12,7 @@ import {
 } from "../../src/coding/local/job-reference-sources.ts";
 import {
   checkReferenceSources,
+  normalizeReferenceRepositoryIds,
   type ReferenceSource,
   requestedReferences,
 } from "../../src/coding/reference-sources.ts";
@@ -246,4 +247,50 @@ test("reference preparation checks out the exact pin despite a newer branch tip,
   await expect(
     prepareReferenceCheckouts([pinned], undefined, root),
   ).rejects.toThrow("coding_reference_source_unavailable");
+});
+
+test("contributor context sources and explicit reference IDs resolve references while ignoring assistant or bystander text", () => {
+  const f = fixture();
+  // Multi-turn confirmation: latest input is short ("开始！"), earlier contributor message names the reference.
+  expect(
+    requestedReferences(f.w, f.task, f.inputs("开始！"), [
+      { id: "prev-1", author: "101", text: "参照 stonega/telo 实现类似功能" },
+    ]).map((r) => r.id),
+  ).toEqual([2]);
+  // Assistant and non-contributor messages in context can never select reference repositories.
+  expect(
+    requestedReferences(f.w, f.task, f.inputs("开始！"), [
+      { id: "prev-a", author: "assistant", text: "参考 stonega/telo" },
+      { id: "prev-b", author: "202", text: "参考 stonega/telo" },
+    ]),
+  ).toEqual([]);
+  // Explicit requestedReferenceRepositoryIds work even when user text has a typo (e.g. "teelo").
+  f.task.requestedReferenceRepositoryIds = [1, 2, 2];
+  expect(
+    requestedReferences(f.w, f.task, f.inputs("开始！"), [
+      { id: "prev-typo", author: "101", text: "参照 teelo 实现" },
+    ]).map((r) => r.id),
+  ).toEqual([2]);
+  // Group-bound tasks never attach private reference repositories.
+  f.task.groupRepository = {
+    revision: 1,
+    botId: "999",
+    installationId: 501,
+    connectionRevision: 1,
+    repositoryRevision: 0,
+    repositoryId: 1,
+    full_name: "stonega/telo-landing",
+    savedBy: "101",
+    savedAt: new Date().toISOString(),
+  };
+  expect(() => requestedReferences(f.w, f.task, f.inputs("开始！"))).toThrow(
+    "coding_reference_source_unavailable",
+  );
+  // Unknown, archived, or >4 explicit IDs fail closed.
+  expect(() => normalizeReferenceRepositoryIds(f.w, 1, ["101"], [999])).toThrow(
+    "coding_reference_source_unavailable",
+  );
+  expect(() =>
+    normalizeReferenceRepositoryIds(f.w, 1, ["101"], [2, 3, 4, 5, 6]),
+  ).toThrow("coding_reference_source_limit");
 });

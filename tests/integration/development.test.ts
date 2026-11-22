@@ -1816,6 +1816,180 @@ const url = process.env.TEST_DATABASE_URL;
     expect(resolutions).toBe(2);
   });
 
+  test("multi-turn context references and explicit referenceRepositoryIds pin sources even after short confirmations or typos", async () => {
+    const f = await fixture("开始！", "101", undefined, (w) => {
+      w.github?.repositories.push(
+        {
+          id: 7002,
+          full_name: "example/source",
+          default_branch: "main",
+          private: true,
+        },
+        {
+          id: 7003,
+          full_name: "example/extra",
+          default_branch: "main",
+          private: true,
+        },
+      );
+    });
+    // Case 1: Contributor's earlier context message names example/source while input is only "开始！".
+    await store.change(f.w.id, async (w, sql) => {
+      const expiresAt = new Date(Date.now() + 86400_000).toISOString();
+      const earlier: Source = {
+        id: "earlier-user-msg",
+        chatId: "101",
+        topicId: 3,
+        author: "101",
+        role: "user",
+        text: "参照 example/source 做个类似项目",
+        directed: true,
+        at: new Date().toISOString(),
+        expiresAt,
+      };
+      w.messages.push(earlier);
+      await sql.query(
+        "UPDATE coding_task_events SET data=$3 WHERE workspace_id=$1 AND task_id=$2 AND id='context'",
+        [
+          f.w.id,
+          f.task.id,
+          JSON.stringify({
+            sources: [
+              {
+                id: earlier.id,
+                author: earlier.author,
+                text: earlier.text,
+                expiresAt,
+              },
+            ],
+          }),
+        ],
+      );
+    });
+    await f.tick();
+    expect(f.starts[0]?.development.referenceSources).toMatchObject([
+      { repositoryId: 7002, repository: "example/source", sha: "c".repeat(40) },
+    ]);
+    expect(f.starts[0]?.referenceToken).toBeTruthy();
+
+    // Case 2: Explicit referenceRepositoryIds work even when the user's message has a typo.
+    const typoRun = await store.change(f.w.id, async (w, sql) => {
+      const earlier: Source = {
+        id: "999:101:201",
+        chatId: "101",
+        topicId: 3,
+        author: "101",
+        role: "user",
+        text: "参照 coodex-source 做个类似项目",
+        directed: true,
+        at: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 86400_000).toISOString(),
+      };
+      w.messages.push(earlier);
+      const run = createRun(w, "101", "开始！", "101", 3, "gpt-4.1-mini", {
+        replyTo: 202,
+        botId: "999",
+      });
+      run.status = "running";
+      run.sources.push(structuredClone(earlier));
+      const current = present(
+        w.messages.find((s) => s.runId === run.id && s.role === "user"),
+      );
+      const task = await startDevelopment(
+        sql,
+        w,
+        run.id,
+        "101",
+        7001,
+        [current.id, earlier.id],
+        "999",
+        "",
+        undefined,
+        undefined,
+        [7002],
+      );
+      return { task, run };
+    });
+    await f.executor().advance(f.w.id, typoRun.task.id);
+    expect(f.starts.at(-1)?.development.taskId).toBe(typoRun.task.id);
+    expect(f.starts.at(-1)?.development.referenceSources).toMatchObject([
+      { repositoryId: 7002, repository: "example/source", sha: "c".repeat(40) },
+    ]);
+    await f.executor().advance(f.w.id, typoRun.task.id);
+    // Adding an explicit referenceRepositoryId on follow-up pins it alongside the earlier one.
+    await store.change(f.w.id, async (w, sql) => {
+      const t = await taskGet(sql, w.id, typoRun.task.id);
+      t.state = "waiting";
+      t.attemptId = undefined;
+      t.nextPollAt = undefined;
+      t.leaseUntil = undefined;
+      t.question = { id: randomUUID(), text: "Anything else?", revision: 1 };
+      await taskSave(sql, t);
+      await sql.query(
+        "UPDATE coding_task_attempts SET state='done' WHERE workspace_id=$1 AND task_id=$2",
+        [w.id, t.id],
+      );
+      const answer: Source = {
+        id: "999:101:203",
+        chatId: "101",
+        topicId: 3,
+        author: "101",
+        role: "user",
+        text: "把那个额外的也加上",
+        directed: true,
+        at: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 86400_000).toISOString(),
+      };
+      w.messages.push(answer);
+      await appendDevelopment(
+        sql,
+        w,
+        t,
+        "101",
+        answer,
+        `${answer.id}:relay`,
+        [7003],
+      );
+    });
+    await f.executor().advance(f.w.id, typoRun.task.id);
+    expect(f.starts.at(-1)?.development.referenceSources).toMatchObject([
+      { repositoryId: 7002, repository: "example/source" },
+      { repositoryId: 7003, repository: "example/extra" },
+    ]);
+
+    // Case 3: Denied read access rejects explicit referenceRepositoryIds immediately.
+    await store.change(f.w.id, (w) => {
+      const m = w.members.find((member) => member.id === "101");
+      const entry = m?.github?.repositories.find((r) => r.id === 7003);
+      if (entry) entry.permissions = { pull: false, push: false, admin: false };
+    });
+    await expect(
+      store.change(f.w.id, async (w, sql) => {
+        const run = createRun(w, "101", "重试", "101", 3, "gpt-4.1-mini", {
+          replyTo: 204,
+          botId: "999",
+        });
+        run.status = "running";
+        const current = present(
+          w.messages.find((s) => s.runId === run.id && s.role === "user"),
+        );
+        return startDevelopment(
+          sql,
+          w,
+          run.id,
+          "101",
+          7001,
+          [current.id],
+          "999",
+          "",
+          undefined,
+          undefined,
+          [7003],
+        );
+      }),
+    ).rejects.toThrow("github_user_access_denied");
+  });
+
   test("an authorized continuation of a historical source question prepares the missing snapshot before repeating intake", async () => {
     const text = "Copy docs/user from source into workspace";
     const f = await fixture(text, "101", undefined, (w) => {

@@ -115,6 +115,7 @@ export function browserPanelTask(task: DevelopmentTask): DevelopmentTask {
   };
   delete safe.result;
   delete safe.question;
+  delete safe.requestedReferenceRepositoryIds;
   delete safe.referenceSources;
   delete safe.threadId;
   delete safe.progress;

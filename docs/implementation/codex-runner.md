@@ -392,16 +392,19 @@ in-turn authenticated fetch/pull is not available. This avoids misreporting an
 intentional credential boundary as a disconnected GitHub account. See the
 [upstream-authentication incident](../../postmortem/2026-10-23-codex-redundant-git-pull.md).
 
-Authenticated task inputs may explicitly name up to four other workspace-selected
-repositories as references. Full repository names, or unique short names, select
-sources independently of the modification target. Every contributor needs verified
-read access; source write access is unnecessary. Before intake, the worker resolves
-each source's default branch to a commit through GitHub and records its identity,
-connection/repository generations and input revision. The preparation container
-checks out that exact commit under `/task/references/<repositoryId>`. The handoff
-provides the paths for repository sync scripts and their provenance manifests.
-Sources stay pinned through work and repair; a later intake revision resolves them
-again. References are not publication targets.
+Authenticated task inputs, contributor-authored context messages, or explicit
+`referenceRepositoryIds` on `start_development_task` / `send_development_input`
+may select up to four other workspace-selected repositories as read-only
+references. Full repository names, unique short names, or validated repository
+IDs select sources independently of the modification target. Every contributor
+needs verified read access; source write access is unnecessary, and
+repository-bound group tasks reject private references. Before intake, the worker
+resolves each source's default branch to a commit through GitHub and records its
+identity, connection/repository generations and input revision. The preparation
+container checks out that exact commit under `/task/references/<repositoryId>`.
+The handoff provides the paths for repository sync scripts and their provenance
+manifests. Sources stay pinned through work and repair; a later intake revision
+resolves them again. References are not publication targets.
 
 A separate Contents-read token scoped only to the references is supplied to
 preparation and preparation recovery. It is excluded from job JSON, durable runner
