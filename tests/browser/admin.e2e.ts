@@ -474,7 +474,17 @@ test.describe
       await expect(
         page.getByRole("heading", { name: "Your team, in view" }),
       ).toBeVisible();
-      const teamCard = page.getByRole("region", { name: "Team" });
+      await expect(
+        page.getByRole("region", { name: "Team", exact: true }),
+      ).toHaveCount(0);
+      await expect(
+        page.getByRole("button", { name: "Edit team configuration" }),
+      ).toHaveCount(0);
+      await page.getByRole("link", { name: "Settings", exact: true }).click();
+      await expect(
+        page.getByRole("heading", { name: "Workspace settings" }),
+      ).toBeVisible();
+      const teamCard = page.getByRole("region", { name: "Team", exact: true });
       await expect(teamCard).toContainText("Browser team");
       await expect(teamCard).toContainText("5 minutes");
       for (const label of ["Run budget (USD)", "Monthly budget (USD)"])
@@ -607,7 +617,7 @@ test.describe
         teamCard.getByRole("listitem").filter({ hasText: "Workspace name" }),
       ).toContainText("Browser team");
       const second = await context.newPage();
-      await second.goto("/admin/overview");
+      await second.goto("/admin/settings");
       await second
         .getByRole("button", { name: "Edit team configuration" })
         .click();

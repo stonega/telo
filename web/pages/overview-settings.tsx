@@ -69,8 +69,6 @@ export function ReadPage({
   admin: Session["admin"];
 }) {
   const { data, error, reload, loading } = useData<{
-    settings?: Settings;
-    version?: number;
     counts?: {
       members: number;
       runs: number;
@@ -84,11 +82,6 @@ export function ReadPage({
     };
     items?: Audit[];
   }>(`/api/admin/workspaces/${id}/${resource}`);
-  const [current, setCurrent] = useState<{
-    version: number;
-    settings: Settings;
-  }>();
-  const [editing, setEditing] = useState(false);
   const notify = useToast();
   const [managingBot, setManagingBot] = useState(false);
   const [managingGitHub, setManagingGitHub] = useState(false);
@@ -102,10 +95,6 @@ export function ReadPage({
         ? { codingTasks: undefined }
         : {}),
   };
-  useEffect(() => {
-    if (resource === "overview" && data?.settings && data.version)
-      setCurrent({ version: data.version, settings: data.settings });
-  }, [resource, data]);
   return (
     <Page
       title={resource === "overview" ? "Your team, in view" : "Audit history"}
@@ -269,61 +258,6 @@ export function ReadPage({
               onUpdated={() => reload()}
             />
           )}
-          <section className="card" aria-label="Team" aria-busy={loading}>
-            <div className="row team-card-heading">
-              <div>
-                <h2>{current?.settings.name ?? "Team configuration"}</h2>
-                <p className="muted">
-                  Settings version{" "}
-                  {current?.version ??
-                    (loading ? <Skeleton width="2em" /> : "Unavailable")}
-                </p>
-              </div>
-              <IconButton
-                icon="edit"
-                label="Edit team configuration"
-                disabled={!current || loading || !!error}
-                onClick={() => {
-                  setEditing(true);
-                }}
-              />
-            </div>
-            <ul className="settings-list">
-              {workspaceFields.map((field) => (
-                <li className="settings-item" key={field.key}>
-                  <div className="settings-item-details">
-                    <h3>{field.label}</h3>
-                    <p className="settings-item-value">
-                      {current ? (
-                        settingValue(field.key, current.settings[field.key])
-                      ) : loading ? (
-                        <Skeleton width="60%" />
-                      ) : (
-                        "Unavailable"
-                      )}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-          {editing && current && (
-            <WorkspaceSettingsEditor
-              id={id}
-              current={current}
-              onClose={() => setEditing(false)}
-              onConflict={() => {
-                setEditing(false);
-                reload();
-              }}
-              onSaved={(updated) => {
-                setCurrent(updated);
-                setEditing(false);
-                notify("Team configuration saved.");
-                reload();
-              }}
-            />
-          )}
         </>
       ) : (
         <section className="card">
@@ -458,6 +392,7 @@ export function SettingsPage({ id }: { id: string }) {
   }>(`/api/admin/workspaces/${id}/settings`);
   const [current, setCurrent] = useState<typeof data>();
   const [confirming, setConfirming] = useState(false);
+  const [editingTeam, setEditingTeam] = useState(false);
   const [editingCurrency, setEditingCurrency] = useState(false);
   const notify = useToast();
   useEffect(() => {
@@ -468,13 +403,66 @@ export function SettingsPage({ id }: { id: string }) {
   return (
     <Page
       title="Workspace settings"
-      description="Set your team's preferred currency and manage workspace activity."
+      description="Manage team configuration, preferred currency and workspace activity."
     >
       <ErrorToast message={error}>
         <button type="button" disabled={loading} onClick={reload}>
           Retry
         </button>
       </ErrorToast>
+      <section className="card" aria-label="Team" aria-busy={loading}>
+        <div className="card-heading team-card-heading">
+          <div>
+            <h2>{current?.settings.name ?? "Team configuration"}</h2>
+            <p className="muted">
+              Settings version{" "}
+              {current?.version ??
+                (loading ? <Skeleton width="2em" /> : "Unavailable")}
+            </p>
+          </div>
+          <IconButton
+            icon="edit"
+            label="Edit team configuration"
+            disabled={!current || loading || !!error}
+            onClick={() => setEditingTeam(true)}
+          />
+        </div>
+        <ul className="settings-list">
+          {workspaceFields.map((field) => (
+            <li className="settings-item" key={field.key}>
+              <div className="settings-item-details">
+                <h3>{field.label}</h3>
+                <p className="settings-item-value">
+                  {current ? (
+                    settingValue(field.key, current.settings[field.key])
+                  ) : loading ? (
+                    <Skeleton width="60%" />
+                  ) : (
+                    "Unavailable"
+                  )}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+      {editingTeam && current && (
+        <WorkspaceSettingsEditor
+          id={id}
+          current={current}
+          onClose={() => setEditingTeam(false)}
+          onConflict={() => {
+            setEditingTeam(false);
+            reload();
+          }}
+          onSaved={(updated) => {
+            setCurrent(updated);
+            setEditingTeam(false);
+            notify("Team configuration saved.");
+            reload();
+          }}
+        />
+      )}
       <section
         className="card team-currency-card"
         aria-label="Team currency"
@@ -531,9 +519,9 @@ export function SettingsPage({ id }: { id: string }) {
           <h2>Pause workspace</h2>
           {current ? (
             <span className="pill">{paused ? "Paused" : "Active"}</span>
-          ) : (
-            <Skeleton />
-          )}
+          ) : loading ? (
+            <Skeleton width="5em" />
+          ) : null}
         </div>
         <p className="muted">
           Pause assistant runs, scheduled work and pending run deliveries in

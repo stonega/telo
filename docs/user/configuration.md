@@ -62,7 +62,7 @@ and token counts remain recorded for models with finite or unlimited budgets.
 
 ## 工作区预算与保留
 
-在 **Overview** 的工作区编辑器调整时区、保留期限、单次和月度 USD 预算。
+在 **Settings** 的团队配置编辑器调整工作区名称、时区、保留期限、单次和月度 USD 预算。
 
 - 预算留空为 **None**，表示不设金额上限；`0` 仅允许零费用请求。
 - 未确认费用继续占用预留预算，直到管理员核对。

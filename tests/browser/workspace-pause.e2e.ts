@@ -101,12 +101,19 @@ for (const width of [1280, 390]) {
       .click();
     await expect(activity).toContainText("Active");
     expect(writes[1]).toEqual({ version: 4, settings: original });
-    await page.goto(`/admin/overview?workspace=${workspaceId}`);
     await page.getByRole("button", { name: "Edit team configuration" }).click();
     await expect(
       page
         .getByRole("dialog", { name: "Edit team configuration" })
         .getByLabel("Pause workspace"),
+    ).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await page.goto(`/admin/overview?workspace=${workspaceId}`);
+    await expect(
+      page.getByRole("region", { name: "Team", exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Edit team configuration" }),
     ).toHaveCount(0);
   });
 }

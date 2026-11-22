@@ -13,7 +13,7 @@ when implementing or reviewing a change.
 
 | Decision | Relevant preferences |
 | --- | --- |
-| Saved display versus editing | [Modal editors](#add-and-create-flows-use-modals), [workspace values](#workspace-settings-show-saved-values-before-editing), [team summary](#team-configuration-uses-one-overview-editor), [model summary](#model-configuration-uses-a-summary-card-and-one-editor) |
+| Saved display versus editing | [Modal editors](#add-and-create-flows-use-modals), [workspace values](#workspace-settings-show-saved-values-before-editing), [team summary](#team-configuration-uses-one-settings-editor), [model summary](#model-configuration-uses-a-summary-card-and-one-editor) |
 | Plugin detail layout | [Shared plugin layout](#plugin-details-share-card-layouts-and-a-title-switch), [Codex sections](#codex-details-show-configuration-and-tasks-separately) |
 | Integration setup input | [Discover resource identifiers](#connections-discover-resource-identifiers) |
 | Browser authentication input | [Shared secure input page](#browser-tasks-share-one-secure-input-page) |
@@ -909,7 +909,7 @@ when implementing or reviewing a change.
   and saved activity status. Place the Active/Paused badge immediately after the
   Pause workspace card title in the same row. Open a confirmation dialog before
   pausing, with explicit consequences and Cancel. Provide Resume workspace when paused. Keep
-  pause out of the Overview team configuration editor and place Settings directly
+  pause out of the team configuration editor and place Settings directly
   below Plugins in the sidebar.
 - **Scope:** Workspace administration on desktop and mobile.
 - **Source:** 2026-10-06 — user requested replacing the model-capacity content with
@@ -1536,17 +1536,30 @@ when implementing or reviewing a change.
 - **Exceptions:** Model-price currency remains an independent price override.
   Changing team currency does not convert monetary amounts or fetch exchange rates.
 
-### Team configuration uses one overview editor
+### Team configuration uses one Settings editor
 
-- **Preference:** Show saved workspace configuration in the Overview team card.
+- **Preference:** Show saved workspace configuration in the Team configuration
+  card on Workspace settings (`/admin/settings`), rather than on Overview.
   Present the labels and values in a compact responsive grid; keep explanations
-  in the editor. Place one Edit action on the card and edit all changeable settings
-  together in one dialog with one save action. Keep fixed policy values visible
-  and read-only.
-- **Scope:** Workspace Overview configuration for authorized administrators.
+  in the editor. Place one Edit icon action at the top right of the card and
+  edit all changeable settings together in one modal dialog with one save
+  action. Keep fixed policy values visible and read-only.
+- **Scope:** Workspace settings (`/admin/settings`) for authorized administrators
+  on desktop and mobile, in both light and dark themes. Overview retains counts
+  and connected services without the Team configuration card.
 - **Source:** 2026-09-28 — user showed the separate Configuration list and asked
-  to show its values in the Overview team card, with one edit button and one form.
-  The user then asked to make that card more compact, suggesting a grid layout.
+  to show its values in one team card, with one edit button and one form, then
+  asked for a compact grid layout.
+- **Source update:** 2026-11-22 — user shared the Team configuration card and
+  requested moving it to the Settings page, removing it from Overview while
+  keeping Team currency as its own separate card below it.
+- **Acceptance:** Overview shows no Team configuration card or Edit team
+  configuration button. Settings shows the Team configuration card above Team
+  currency and Pause workspace, with no inline form controls, a top-right Edit
+  icon staying aligned on mobile, compact grid values, and modal editing with
+  Cancel discard, pending locks, in-dialog errors, conflict reload and toast
+  confirmation. Verify loading/error/saved states and card spacing at desktop
+  and mobile widths in both themes.
 - **Exceptions:** Pause is managed separately on Workspace settings with
   confirmation. Team currency has its own Settings card and focused editor.
   Model capacity is available in deployment Model settings.
@@ -1554,7 +1567,7 @@ when implementing or reviewing a change.
 ### Model configuration uses a summary card and one editor
 
 - **Preference:** Show saved model configuration as a compact responsive grid of
-  labels and values, matching the Overview team card. Place one Edit icon at the
+  labels and values, matching the team configuration card. Place one Edit icon at the
   top right to open a modal containing model selection and advanced settings.
   Saved provider summaries have their own New/Edit dialogs for the URL and key. Keep explanations and validation in the editor; show only
   configured/missing status for the write-only API key. Cancel discards the draft;

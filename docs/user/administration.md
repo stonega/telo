@@ -42,8 +42,8 @@ Use the member row’s **Edit** dialog to manage its role, active membership and
 
 | 页面 | 主要用途 |
 | --- | --- |
-| Overview | 工作区摘要、时区、预算和保留期限 |
-| Settings | Team currency, activity status and pause/resume |
+| Overview | 工作区摘要和已连接服务（Telegram 机器人、GitHub App） |
+| Settings | 团队配置（工作区名称、时区、预算和保留期限）、Team currency、活动状态与暂停/恢复 |
 | Groups & Members | Workspace members, GitHub accounts, access requests and Telegram group management |
 | Plugins / Skills / Workflows / Instructions | 集成、技能、定时工作和持久指令 |
 | Runs & delivery / Usage / Audit / Privacy | 运行、交付、费用、审计和删除 |
