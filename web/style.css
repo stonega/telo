@@ -1021,16 +1021,52 @@ input.plugin-toggle-input:checked::before {
   margin: 0;
   max-width: 170px;
 }
+.github-details {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+}
+.github-details > * {
+  margin: 0;
+}
+.github-repository-actions {
+  gap: 8px;
+}
+.github-repositories {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--ui-border);
+  min-width: 0;
+}
+.github-repositories > * {
+  margin: 0;
+}
+.github-repositories-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.github-repositories-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ui-text);
+}
+.github-repositories-count {
+  font-size: 12px;
+}
 .repository-list {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
-}
-.github-details .row + .repository-list {
-  margin-top: 12px;
 }
 .cloudflare-domain-fields {
   min-width: 0;
@@ -1047,8 +1083,10 @@ input.plugin-toggle-input:checked::before {
 }
 .repository-list-stacked {
   display: grid;
+  align-items: stretch;
 }
 .repository-list-item {
+  display: flex;
   min-width: 0;
   max-width: 100%;
   padding: 0;
@@ -1066,7 +1104,8 @@ input.plugin-toggle-input:checked::before {
   font-size: 13px;
 }
 .repository-card-compact {
-  padding: 4px 6px 4px 10px;
+  width: 100%;
+  padding: 1px 1px 1px 12px;
 }
 .repository-card-heading {
   display: flex;
@@ -1074,6 +1113,10 @@ input.plugin-toggle-input:checked::before {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 8px;
+}
+.repository-card-compact .repository-card-heading {
+  flex-wrap: nowrap;
+  gap: 2px;
 }
 .repository-card-identity {
   display: flex;
@@ -1083,12 +1126,16 @@ input.plugin-toggle-input:checked::before {
   min-width: 0;
   gap: 6px;
 }
+.repository-card-compact .repository-card-identity {
+  flex: 1 1 auto;
+  padding: 8px 0;
+}
 .repository-card-name {
   min-width: 0;
   margin: 0;
   font-size: 13px;
   font-weight: 600;
-  line-height: 1.6;
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 .repository-card-actions {
@@ -1096,6 +1143,9 @@ input.plugin-toggle-input:checked::before {
   align-items: center;
   flex-wrap: wrap;
   gap: 4px;
+}
+.repository-card-compact .repository-card-actions {
+  flex: 0 0 auto;
 }
 .repository-card-details {
   margin-top: 8px;
@@ -1121,13 +1171,18 @@ input.plugin-toggle-input:checked::before {
   outline-offset: 2px;
 }
 button.github-repository-more {
-  min-height: 36px;
-  padding: 2px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0 14px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--ui-accent-soft);
   color: var(--ui-accent);
   font-size: 13px;
+  line-height: 1.45;
+  white-space: nowrap;
 }
 button.github-repository-more:hover:not(:disabled) {
   background: var(--ui-accent-soft-hover);
@@ -1329,6 +1384,9 @@ button.github-repository-more:hover:not(:disabled) {
 }
 .run-card-heading .pill {
   flex: 0 0 auto;
+}
+.github-details > .pill {
+  justify-self: start;
 }
 .steps {
   display: flex;
@@ -3117,6 +3175,15 @@ input.plugin-toggle-input:disabled {
   margin-top: 6px;
 }
 @media (max-width: 640px) {
+  .github-repository-actions > button {
+    flex: 1 1 auto;
+  }
+  .repository-list-item {
+    flex: 1 1 100%;
+  }
+  button.github-repository-more {
+    width: 100%;
+  }
   .repository-card:not(.repository-card-compact) .repository-card-identity {
     flex-basis: 100%;
   }

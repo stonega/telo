@@ -466,7 +466,11 @@ export function GitHubConnection({
             )}
             {data?.configured && (
               <p>
-                App: <strong>{data.appSlug}</strong>.{" "}
+                {data.appSlug && (
+                  <>
+                    App: <strong>{data.appSlug}</strong>.{" "}
+                  </>
+                )}
                 <a href={data.installUrl} target="_blank" rel="noreferrer">
                   Install or update the GitHub App
                 </a>
@@ -489,7 +493,7 @@ export function GitHubConnection({
                   ask the Telegram assistant to draft an issue and review its
                   Approve/Reject buttons.
                 </p>
-                <div className="row">
+                <div className="row github-repository-actions">
                   <button
                     type="button"
                     className="secondary"
@@ -530,39 +534,56 @@ export function GitHubConnection({
                     </button>
                   )}
                 </div>
-                <ul
-                  className="repository-list"
-                  aria-label="Connected repositories"
-                >
-                  {(showAllRepositories
-                    ? data.connection.repositories
-                    : data.connection.repositories.slice(0, 5)
-                  ).map((repo) => (
-                    <li className="repository-list-item" key={repo.id}>
-                      <RepositoryCard
-                        compact
-                        name={repo.full_name}
-                        url={`https://github.com/${repo.full_name}`}
-                      />
-                    </li>
-                  ))}
-                  {data.connection.repositories.length > 5 && (
-                    <li className="repository-list-item">
-                      <button
-                        type="button"
-                        className="github-repository-more"
-                        aria-expanded={showAllRepositories}
-                        onClick={() =>
-                          setShowAllRepositories(!showAllRepositories)
-                        }
-                      >
-                        {showAllRepositories
-                          ? "Show less"
-                          : `${data.connection.repositories.length - 5} more`}
-                      </button>
-                    </li>
+                <div className="github-repositories">
+                  <div className="github-repositories-header">
+                    <span className="github-repositories-title">
+                      Connected repositories
+                    </span>
+                    <span className="muted github-repositories-count">
+                      {data.connection.repositories.length}{" "}
+                      {data.connection.repositories.length === 1
+                        ? "repository"
+                        : "repositories"}
+                    </span>
+                  </div>
+                  {data.connection.repositories.length === 0 ? (
+                    <p className="muted">No repositories connected.</p>
+                  ) : (
+                    <ul
+                      className="repository-list"
+                      aria-label="Connected repositories"
+                    >
+                      {(showAllRepositories
+                        ? data.connection.repositories
+                        : data.connection.repositories.slice(0, 5)
+                      ).map((repo) => (
+                        <li className="repository-list-item" key={repo.id}>
+                          <RepositoryCard
+                            compact
+                            name={repo.full_name}
+                            url={`https://github.com/${repo.full_name}`}
+                          />
+                        </li>
+                      ))}
+                      {data.connection.repositories.length > 5 && (
+                        <li className="repository-list-item">
+                          <button
+                            type="button"
+                            className="github-repository-more"
+                            aria-expanded={showAllRepositories}
+                            onClick={() =>
+                              setShowAllRepositories(!showAllRepositories)
+                            }
+                          >
+                            {showAllRepositories
+                              ? "Show less"
+                              : `${data.connection.repositories.length - 5} more`}
+                          </button>
+                        </li>
+                      )}
+                    </ul>
                   )}
-                </ul>
+                </div>
               </>
             )}
             {data?.configured && !data.connection && (
@@ -577,35 +598,39 @@ export function GitHubConnection({
                 can still be queried.
               </p>
             )}
-            <div className="row">
-              {data?.configured && !data.connection?.installationId && (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() =>
-                    void act(async () => {
-                      const result = await request<{ url: string }>(
-                        `${endpoint}/connect`,
-                        "POST",
-                        source ? { source } : {},
-                      );
-                      window.location.assign(result.url);
-                    })
-                  }
-                >
-                  Connect GitHub
-                </button>
-              )}
-              {(error || refreshError) && (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void load()}
-                >
-                  Reload GitHub connection
-                </button>
-              )}
-            </div>
+            {((data?.configured && !data.connection?.installationId) ||
+              error ||
+              refreshError) && (
+              <div className="row">
+                {data?.configured && !data.connection?.installationId && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      void act(async () => {
+                        const result = await request<{ url: string }>(
+                          `${endpoint}/connect`,
+                          "POST",
+                          source ? { source } : {},
+                        );
+                        window.location.assign(result.url);
+                      })
+                    }
+                  >
+                    Connect GitHub
+                  </button>
+                )}
+                {(error || refreshError) && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void load()}
+                  >
+                    Reload GitHub connection
+                  </button>
+                )}
+              </div>
+            )}
             {data?.pending && (
               <form
                 onSubmit={(event) => {

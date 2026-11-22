@@ -208,6 +208,9 @@ test("operator can enable all-repository auto-sync and manually sync from Manage
 }) => {
   const { dialog, state } = await fixture(page);
   await expect(dialog).toContainText("Selected repositories");
+  await expect(dialog.locator(".github-repositories-count")).toHaveText(
+    "7 repositories",
+  );
   await expect(
     dialog.getByRole("button", { name: "Sync repositories" }),
   ).toBeVisible();
@@ -225,6 +228,9 @@ test("operator can enable all-repository auto-sync and manually sync from Manage
   expect(state.syncCalls).toBe(1);
   expect(state.lastSyncBody).toEqual({ revision: 1, allRepositories: true });
   await expect(dialog).toContainText("All repositories (auto-sync)");
+  await expect(dialog.locator(".github-repositories-count")).toHaveText(
+    "8 repositories",
+  );
   await expect(dialog.getByRole("status")).toContainText(
     "All-repository auto-sync enabled. 8 repositories connected (1 added).",
   );
@@ -244,8 +250,34 @@ test("operator can enable all-repository auto-sync and manually sync from Manage
     "Repositories are up to date (8 connected).",
   );
 
-  // Desktop and mobile layout verification (light + dark, zero overflow).
+  // Desktop and mobile layout verification (light + dark, alignment, zero empty wrappers or overflow).
   await page.setViewportSize({ width: 1280, height: 720 });
+  const desktopMetrics = await dialog.evaluate((element) => {
+    const emptyRows = Array.from(element.querySelectorAll(".row")).filter(
+      (row) => row.children.length === 0,
+    ).length;
+    const lastCard = element
+      .querySelectorAll(".repository-card-compact")
+      .item(element.querySelectorAll(".repository-card-compact").length - 1);
+    const toggle = element.querySelector(".github-repository-more");
+    if (!lastCard || !toggle) throw new Error("Missing repo list controls");
+    const cardRect = lastCard.getBoundingClientRect();
+    const toggleRect = toggle.getBoundingClientRect();
+    return {
+      emptyRows,
+      heightDelta: Math.abs(cardRect.height - toggleRect.height),
+      centerDelta: Math.abs(
+        cardRect.top +
+          cardRect.height / 2 -
+          (toggleRect.top + toggleRect.height / 2),
+      ),
+      overflow: element.scrollWidth > element.clientWidth,
+    };
+  });
+  expect(desktopMetrics.emptyRows).toBe(0);
+  expect(desktopMetrics.heightDelta).toBeLessThanOrEqual(2);
+  expect(desktopMetrics.centerDelta).toBeLessThanOrEqual(2);
+  expect(desktopMetrics.overflow).toBe(false);
   const screenshotDir = process.env.BROWSER_SCREENSHOT_DIR ?? "test-results";
   await page.screenshot({
     path: `${screenshotDir}/github-sync-desktop-light.png`,
@@ -254,6 +286,25 @@ test("operator can enable all-repository auto-sync and manually sync from Manage
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth <= 390),
   ).toBe(true);
+  const mobileMetrics = await dialog.evaluate((element) => {
+    const list = element.querySelector(".repository-list");
+    const cards = Array.from(element.querySelectorAll(".repository-card"));
+    const toggle = element.querySelector(".github-repository-more");
+    if (!list || !cards.length || !toggle)
+      throw new Error("Missing mobile repository list");
+    const listWidth = list.getBoundingClientRect().width;
+    return {
+      cardsFullWidth: cards.every(
+        (card) => Math.abs(card.getBoundingClientRect().width - listWidth) <= 2,
+      ),
+      toggleFullWidth:
+        Math.abs(toggle.getBoundingClientRect().width - listWidth) <= 2,
+    };
+  });
+  expect(mobileMetrics).toEqual({
+    cardsFullWidth: true,
+    toggleFullWidth: true,
+  });
   await page.screenshot({
     path: `${screenshotDir}/github-sync-mobile-light.png`,
   });
