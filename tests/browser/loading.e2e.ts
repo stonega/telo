@@ -80,6 +80,7 @@ for (const width of [1280, 390]) {
     const startup = page.getByRole("status", { name: "Opening Telo" });
     const expectNeutralStartup = async () => {
       await expect(startup).toBeVisible();
+      await expect(startup).toHaveText("Telo");
       await expect(page.locator(".auth-hero, .setup-steps")).toHaveCount(0);
       await expect(
         page.getByRole("button", { name: "Workspace", exact: true }),
@@ -145,6 +146,7 @@ for (const initialized of [true, false]) {
         name: initialized ? "Welcome back" : "Make this workspace yours",
       }),
     ).toBeVisible();
+    await expect(page.locator("aside .brand")).toHaveText("Telo");
   });
 }
 
@@ -213,6 +215,7 @@ for (const path of [
       .shift()
       ?.fulfill({ status: 503, json: { error: "Service unavailable" } });
     await expect(page.getByRole("alert")).toHaveText("Service unavailable");
+    await expect(page.getByRole("status", { name: "Telo" })).toHaveText("Telo");
     await expect(
       page.locator(".layout-auth, .auth-hero, .auth-form"),
     ).toHaveCount(0);

@@ -56,6 +56,7 @@ for (const width of [320, 390, 800]) {
     const header = page.locator(".mobile-header");
     const version = page.locator(".app-version");
     await expect(trigger).toBeVisible();
+    await expect(header.locator(".mobile-brand")).toHaveText("Telo");
     await expect(page.locator("aside")).toHaveCount(0);
     const before = await main.boundingBox();
     expect(before?.y).toBe(64);
@@ -68,6 +69,7 @@ for (const width of [320, 390, 800]) {
     await trigger.click();
     await expect(trigger).toHaveAttribute("aria-expanded", "true");
     await expect(sheet).toBeVisible();
+    await expect(sheet.locator(".brand")).toHaveText("Telo");
     const bounds = await sheet.boundingBox();
     expect(bounds?.x).toBe(0);
     expect(bounds?.y).toBe(0);
@@ -206,6 +208,7 @@ test("desktop keeps the persistent sidebar and bottom-right version", async ({
   await fixture(page);
   await page.goto("/admin/operations");
   await expect(page.locator("aside")).toBeVisible();
+  await expect(page.locator("aside .brand")).toHaveText("Telo");
   const activeNav = page.locator("nav a.active");
   await expect(activeNav).toHaveCount(1);
   expect(

@@ -1259,12 +1259,15 @@ when implementing or reviewing a change.
 
 - **Preference:** Use the circular sunny golden-orange origami paper boat emblem
   (`telo-mark.svg`) as Telo's brand mark, favicon, sidebar lockup, mobile header
-  mark and auth hub identity.
+  mark and auth hub identity. Pair the mark with just the Telo name in admin
+  navigation, startup, sign-in and setup.
 - **Scope:** Telo logo, favicon and product brand treatment.
 - **Source:** 2026-09-26 — user asked for a minimal green mark.
 - **Source update:** 2026-11-21 / 2026-11-22 — superseded by the Telo rename and
   sunny origami paper boat logo design (`9df3aaa`), with admin UI tokens and
   split-hero styling aligned to the new mark.
+  2026-11-22 — user requested removing the “GITHUB ASSISTANT” subtitle from the
+  admin panel.
 - **Exceptions:** None recorded.
 
 ### Product branding is independent of connected GitHub accounts

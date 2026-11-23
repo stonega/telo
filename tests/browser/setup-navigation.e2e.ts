@@ -96,6 +96,7 @@ for (const width of [1280, 390]) {
             page.getByRole("heading", { name: "Set up your team assistant" }),
           ).toBeVisible();
         }
+        await expect(page.locator("aside .brand")).toHaveText("Telo");
       });
     }
   }

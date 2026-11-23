@@ -338,9 +338,7 @@ function Shell() {
             height="42"
             alt=""
           />
-          <div>
-            Telo<span>GITHUB ASSISTANT</span>
-          </div>
+          Telo
         </div>
         {error && (
           <section className="card">
@@ -370,9 +368,7 @@ function Shell() {
             height="42"
             alt=""
           />
-          <div>
-            Telo<span>GITHUB ASSISTANT</span>
-          </div>
+          Telo
         </div>
         {current && !setupLayout ? (
           <>
