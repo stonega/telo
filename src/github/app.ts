@@ -614,7 +614,7 @@ export class GitHubApp {
       409,
     );
     requireThat(
-      /^(?:pulls\/[1-9]\d*(?:\/files|\/reviews)?|pulls\/comments\/[1-9]\d*|issues\/[1-9]\d*\/comments|issues\/comments\/[1-9]\d*)(?:\?per_page=100&page=[1-9]\d*)?$/.test(
+      /^(?:pulls\/[1-9]\d*(?:\/files|\/reviews)?|pulls\/comments\/[1-9]\d*|issues\/[1-9]\d*(?:\/comments)?|issues\/comments\/[1-9]\d*)(?:\?per_page=100&page=[1-9]\d*)?$/.test(
         path,
       ),
       "invalid_github_item",

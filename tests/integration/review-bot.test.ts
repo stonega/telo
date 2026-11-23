@@ -198,6 +198,14 @@ class Runner implements LocalRunner {
       },
       base: { sha: base, ref: "main" },
     };
+    const issue = {
+      number: 15,
+      state: "open",
+      title: "Pagination crashes on empty page",
+      body: "Calling list with page=2 throws TypeError.",
+      user: { id: 42, login: "fixture-user" },
+      labels: [{ name: "bug" }],
+    };
     const comments = new Map<
       number,
       {
@@ -264,6 +272,16 @@ class Runner implements LocalRunner {
           return Response.json(c);
         }
         if (init.method === "PATCH") {
+          if (path.endsWith("/pulls/23")) {
+            pull.state = data.state ?? pull.state;
+            writes.push({ url: address, method: "PATCH", body: data });
+            return Response.json(pull);
+          }
+          if (path.endsWith("/issues/15")) {
+            issue.state = data.state ?? issue.state;
+            writes.push({ url: address, method: "PATCH", body: data });
+            return Response.json(issue);
+          }
           const id = Number(path.split("/").at(-1));
           const c = comments.get(id);
           if (!c) return Response.json({}, { status: 404 });
@@ -272,6 +290,7 @@ class Runner implements LocalRunner {
           return Response.json(c);
         }
         if (path.endsWith("/pulls/23")) return Response.json(pull);
+        if (path.endsWith("/issues/15")) return Response.json(issue);
         if (path.endsWith("/files"))
           return Response.json([
             {
@@ -280,7 +299,10 @@ class Runner implements LocalRunner {
             },
           ]);
         if (path.endsWith("/reviews")) return Response.json(reviews);
-        if (path.endsWith("/issues/23/comments"))
+        if (
+          path.endsWith("/issues/23/comments") ||
+          path.endsWith("/issues/15/comments")
+        )
           return Response.json([...comments.values()]);
         if (/\/(?:issues|pulls)\/comments\/\d+$/.test(path)) {
           if (!sourceAvailable) return Response.json({}, { status: 503 });
@@ -358,6 +380,7 @@ class Runner implements LocalRunner {
       runner,
       executor,
       pull,
+      issue,
       comments,
       reviews,
       writes,
@@ -1579,5 +1602,142 @@ class Runner implements LocalRunner {
     await f.executor.advance(f.w.id, t.id);
     expect((await f.task()).state).toBe("unknown");
     expect(f.runner.pushes).toHaveLength(0);
+  });
+  test("per-repository PR rules support natural-language auto-close and @bot close commands", async () => {
+    const f = await fixture();
+    await f.service.saveRepositoryRule(f.admin, f.w.id, 7001, {
+      mode: "custom",
+      rule: {
+        enabled: true,
+        autoReview: true,
+        allowAutoClose: true,
+        prInstructions:
+          "Close PRs that modify protected files without an issue.",
+      },
+    });
+    await f.accept();
+    const reviewTask = await f.task();
+    await f.executor.advance(f.w.id, reviewTask.id);
+    expect(f.runner.starts[0]?.development?.context).toContain(
+      "Close PRs that modify protected files without an issue.",
+    );
+    f.runner.states.set(reviewTask.attemptId, {
+      state: "succeeded",
+      result: {
+        ...analysis,
+        title: "CLOSE_PR",
+        summary:
+          "Closing this PR because it modifies protected files without a linked issue. [ACTION:CLOSE]",
+      },
+    });
+    await f.executor.advance(f.w.id, reviewTask.id);
+    await f.executor.advance(f.w.id, reviewTask.id);
+    const completed = await f.task();
+    expect(completed.state).toBe("completed");
+    expect(completed.closedItem).toBe(true);
+    expect(f.pull.state).toBe("closed");
+    expect(f.reviews).toHaveLength(1);
+    expect(f.reviews[0]?.body).not.toContain("[ACTION:CLOSE]");
+
+    // Reopen and test explicit @bot close command on PR
+    f.pull.state = "open";
+    await f.mention("@telo-fixture[bot] close superseded by #25", 120);
+    const closeTask = await f.task(1);
+    expect(closeTask.mode).toBe("close");
+    await f.executor.advance(f.w.id, closeTask.id);
+    expect((await f.task(1)).state).toBe("completed");
+    expect((await f.task(1)).closedItem).toBe(true);
+    expect(f.pull.state).toBe("closed");
+  });
+  test("per-repository issue rules automatically reply to new issues and chain into auto-fix PR creation", async () => {
+    const f = await fixture();
+    await f.service.saveRepositoryRule(f.admin, f.w.id, 7001, {
+      mode: "custom",
+      rule: {
+        enabled: true,
+        issueAutoReply: true,
+        issueAutoFix: true,
+        issueAllowAutoClose: true,
+        issueAcceptRequests: true,
+        issueInstructions:
+          "Explain the root cause and automatically fix reproducible crash issues.",
+      },
+    });
+    await f.accept("issues", {
+      action: "opened",
+      issue: {
+        number: 15,
+        title: f.issue.title,
+        body: f.issue.body,
+        labels: [{ name: "bug" }],
+      },
+    });
+    const replyTask = await f.task(0);
+    expect(replyTask).toMatchObject({
+      targetKind: "issue",
+      number: 15,
+      mode: "answer",
+      automatic: true,
+      autoFixFollowup: true,
+    });
+    await f.executor.advance(f.w.id, replyTask.id);
+    expect(f.runner.starts[0]?.development?.mode).toBe("analysis");
+    expect(f.runner.starts[0]?.development?.review).toBeUndefined();
+    expect(f.runner.starts[0]?.development?.context).toContain(
+      "Explain the root cause and automatically fix reproducible crash issues.",
+    );
+
+    f.runner.states.set(replyTask.attemptId, {
+      state: "succeeded",
+      result: {
+        ...analysis,
+        title: "AUTO_FIX",
+        publishRequested: true,
+        summary:
+          "Root cause: page offset calculation overflows when items are empty. I am preparing a fix PR.",
+      },
+    });
+    await f.executor.advance(f.w.id, replyTask.id);
+    await f.executor.advance(f.w.id, replyTask.id);
+    expect((await f.task(0)).state).toBe("completed");
+    expect((await f.task(0)).commentId).toBeDefined();
+
+    // Verify follow-up fix task was automatically queued for Issue #15
+    const fixTask = await f.task(1);
+    expect(fixTask).toMatchObject({
+      targetKind: "issue",
+      number: 15,
+      mode: "fix",
+      automatic: true,
+      state: "queued",
+    });
+    await f.executor.advance(f.w.id, fixTask.id);
+    expect(f.runner.starts[1]?.development?.mode).toBe("work");
+    expect(f.runner.starts[1]?.development?.pr).toBeUndefined();
+
+    f.runner.states.set(fixTask.attemptId, {
+      state: "ready",
+      checkPassed: true,
+      result: {
+        ...analysis,
+        status: "completed",
+        intent: "implement",
+        title: "Fix empty page offset crash",
+        body: "Fixes #15",
+        summary: "Fixed the offset guard and added a unit test.",
+        verificationCommands: ["bun test"],
+      },
+    });
+    await f.executor.advance(f.w.id, fixTask.id);
+    await f.executor.advance(f.w.id, fixTask.id);
+    await f.executor.advance(f.w.id, fixTask.id);
+    const finishedFix = await f.task(1);
+    expect(finishedFix.state).toBe("completed");
+    expect(finishedFix.prUrl).toBe(
+      "https://github.com/example/workspace/pull/23",
+    );
+    expect(finishedFix.progress?.body).toContain(
+      "Pull request: https://github.com/example/workspace/pull/23",
+    );
   });
 });

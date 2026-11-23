@@ -374,6 +374,7 @@ export async function verifyPluginStartup(
             "rdp_123456_probe",
             "send_telegram_widget",
             "manage_github_notifications",
+            "manage_github_repository_rules",
             "manage_plugin_notifications",
             "obsidian_query",
             "query_google_docs",

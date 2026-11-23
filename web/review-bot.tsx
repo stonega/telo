@@ -432,52 +432,66 @@ export function ReviewBot({
                 </tr>
               </thead>
               <tbody>
-                {page.tasks.map((task) => (
-                  <tr key={task.id}>
-                    <td>
-                      <a
-                        href={`https://github.com/${task.payload.repository}/pull/${task.number}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        {task.payload.repository} #{task.number}
-                      </a>
-                    </td>
-                    <td>{task.automatic ? "Automatic review" : task.mode}</td>
-                    <td>
-                      {task.cancelRequested &&
-                      !["completed", "failed", "cancelled", "unknown"].includes(
-                        task.state,
-                      )
-                        ? "Stopping…"
-                        : task.state.replaceAll("_", " ")}
-                    </td>
-                    <td>
-                      {task.result?.question ??
-                        task.result?.summary ??
-                        task.error ??
-                        "—"}
-                    </td>
-                    <td>
-                      {![
-                        "completed",
-                        "failed",
-                        "cancelled",
-                        "unknown",
-                      ].includes(task.state) && (
-                        <IconButton
-                          icon="stop"
-                          label={`Stop PR #${task.number} task`}
-                          disabled={busy || task.cancelRequested}
-                          onClick={() => {
-                            setError("");
-                            setStopping(task);
-                          }}
-                        />
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {page.tasks.map((task) => {
+                  const isIssue = task.targetKind === "issue";
+                  return (
+                    <tr key={task.id}>
+                      <td>
+                        <a
+                          href={`https://github.com/${task.payload.repository}/${isIssue ? "issues" : "pull"}/${task.number}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {task.payload.repository} #{task.number}
+                        </a>
+                      </td>
+                      <td>
+                        {task.automatic
+                          ? isIssue
+                            ? task.mode === "fix"
+                              ? "Automatic issue fix"
+                              : "Automatic issue reply"
+                            : "Automatic review"
+                          : task.mode}
+                      </td>
+                      <td>
+                        {task.cancelRequested &&
+                        ![
+                          "completed",
+                          "failed",
+                          "cancelled",
+                          "unknown",
+                        ].includes(task.state)
+                          ? "Stopping…"
+                          : task.state.replaceAll("_", " ")}
+                      </td>
+                      <td>
+                        {task.result?.question ??
+                          task.result?.summary ??
+                          task.error ??
+                          "—"}
+                      </td>
+                      <td>
+                        {![
+                          "completed",
+                          "failed",
+                          "cancelled",
+                          "unknown",
+                        ].includes(task.state) && (
+                          <IconButton
+                            icon="stop"
+                            label={`Stop ${isIssue ? "Issue" : "PR"} #${task.number} task`}
+                            disabled={busy || task.cancelRequested}
+                            onClick={() => {
+                              setError("");
+                              setStopping(task);
+                            }}
+                          />
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

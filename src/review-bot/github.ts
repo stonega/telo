@@ -18,6 +18,23 @@ export const pullSnapshot = z.object({
   base: z.object({ ref: z.string(), sha }),
 });
 export type PullSnapshot = z.infer<typeof pullSnapshot>;
+export const issueSnapshot = z.object({
+  number: z.number().int().positive(),
+  state: z.enum(["open", "closed"]),
+  title: z.string(),
+  body: z.string().nullable(),
+  user: z
+    .object({
+      id: z.number().int().positive().optional(),
+      login: z.string(),
+    })
+    .optional(),
+  labels: z
+    .array(z.union([z.string(), z.object({ name: z.string() })]))
+    .optional(),
+  pull_request: z.unknown().optional(),
+});
+export type IssueSnapshot = z.infer<typeof issueSnapshot>;
 export const reviewAxis = z.enum(["standards", "spec"]);
 export const reviewFinding = z
   .object({
@@ -81,6 +98,69 @@ export class ReviewGitHub {
         `pulls/${number}`,
       ),
     );
+  }
+  async issue(number: number): Promise<IssueSnapshot> {
+    return issueSnapshot.parse(
+      await this.app.reviewResource(
+        this.token,
+        this.repository,
+        `issues/${number}`,
+      ),
+    );
+  }
+  async closePull(number: number) {
+    return z
+      .object({
+        number: z.number().int().positive(),
+        state: z.literal("closed"),
+      })
+      .parse(
+        await this.app.reviewResource(
+          this.token,
+          this.repository,
+          `pulls/${number}`,
+          { state: "closed" },
+          "PATCH",
+        ),
+      );
+  }
+  async closeIssue(number: number) {
+    return z
+      .object({
+        number: z.number().int().positive(),
+        state: z.literal("closed"),
+      })
+      .parse(
+        await this.app.reviewResource(
+          this.token,
+          this.repository,
+          `issues/${number}`,
+          { state: "closed" },
+          "PATCH",
+        ),
+      );
+  }
+  async publishIssueReply(task: ReviewTask, body: string) {
+    const marker = reviewMarker(task);
+    const fullBody = body.includes(marker) ? body : `${body}\n\n${marker}`;
+    const existingId =
+      task.commentId ??
+      task.progress?.id ??
+      (await this.find(task.number, "progress", marker));
+    const path = existingId
+      ? `issues/comments/${existingId}`
+      : `issues/${task.number}/comments`;
+    return z
+      .object({ id: z.number().int().positive() })
+      .parse(
+        await this.app.reviewResource(
+          this.token,
+          this.repository,
+          path,
+          { body: fullBody },
+          existingId ? "PATCH" : undefined,
+        ),
+      );
   }
   async source(kind: "issue" | "review", id: number) {
     return z

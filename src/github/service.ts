@@ -3,11 +3,16 @@ import { operator, throttle } from "../admin/auth.ts";
 import { publicOrigin, siteDomain } from "../admin/site.ts";
 import type { Store } from "../db/repositories.ts";
 import { type Admin, Fault, requireThat, type Workspace } from "../domain.ts";
+import {
+  effectiveRepositoryAutomationRule,
+  emptyReview,
+} from "../review-bot/config.ts";
 import { decrypt, encrypt, hash, token } from "../setup/credentials.ts";
 import { GitHubSkills } from "../skills/github-service.ts";
 import { audit } from "../workspaces/policy.ts";
 import type { GitHubApp, GitHubMemberDirectory } from "./app.ts";
 import type { GitHubPage } from "./config.ts";
+import { githubNotificationSettings } from "./notifications.ts";
 import {
   GitHubApps,
   githubAppPermissions,
@@ -143,6 +148,13 @@ export class GitHubService {
             (await this.flow(admin, id, sessionHash)).token,
           )
         : [];
+    const repositoryRules = Object.fromEntries(
+      (w.github?.repositories ?? []).map((repo) => [
+        String(repo.id),
+        effectiveRepositoryAutomationRule(w, repo.id),
+      ]),
+    );
+    const notifSettings = githubNotificationSettings(w);
     return {
       configured: !!app,
       canRegister: !app && this.apps.canRegister,
@@ -157,6 +169,18 @@ export class GitHubService {
       pending: !!row,
       login: row?.login,
       installations,
+      reviewRevision: w.reviewBot?.revision ?? 0,
+      reviewSettings: w.reviewBot?.settings ?? emptyReview,
+      repositoryRules,
+      notificationSettings: {
+        autoNotifyMaintainers: notifSettings.autoNotifyMaintainers,
+        revision: notifSettings.revision,
+      },
+      subscriptions: admin.telegramId
+        ? (w.githubNotifications ?? []).filter(
+            (s) => s.actor === admin.telegramId,
+          )
+        : [],
     };
   }
   async begin(admin: Admin, id: string, sessionHash: string, source?: "setup") {

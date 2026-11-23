@@ -1,9 +1,16 @@
 import { operator } from "../admin/auth.ts";
 import type { Store } from "../db/repositories.ts";
 import { type Admin, requireThat, type Workspace } from "../domain.ts";
-import { authorizeVerifiedRepository } from "../github/user-access.ts";
+import {
+  authorizeVerifiedRepository,
+  repositoryMaintainer,
+} from "../github/user-access.ts";
 import { eligible } from "../workspaces/policy.ts";
-import type { ReviewTask } from "./config.ts";
+import {
+  effectiveRepositoryAutomationRule,
+  type ReviewTask,
+  type TriggerAuthors,
+} from "./config.ts";
 
 /** One PR destination, including after a GitHub connection changes its scope. */
 export async function reviewDestination(
@@ -40,22 +47,49 @@ export function reviewActor(
   authorizeVerifiedRepository(w, member.id, repositoryId, write);
   return member.id;
 }
+
+export function checkTriggerAuthor(
+  w: Workspace,
+  githubId: number,
+  repositoryId: number,
+  triggerAuthors: TriggerAuthors,
+): string | undefined {
+  if (triggerAuthors === "all") return w.operatorId;
+  const member = w.members.find((m) => m.github?.id === githubId);
+  if (!member || !eligible(w, member.id)) return undefined;
+  try {
+    if (triggerAuthors === "maintainers") {
+      if (!repositoryMaintainer(w, member.id, repositoryId)) return undefined;
+      authorizeVerifiedRepository(w, member.id, repositoryId, true);
+    } else {
+      authorizeVerifiedRepository(w, member.id, repositoryId, false);
+    }
+    return member.id;
+  } catch {
+    return undefined;
+  }
+}
+
 export function checkReview(w: Workspace, task: ReviewTask, stopping = false) {
+  const isIssue = task.targetKind === "issue";
   requireThat(
     !w.deletion &&
       (task.automatic
-        ? task.actor === w.operatorId && task.mode === "review"
+        ? (task.actor === w.operatorId || eligible(w, task.actor)) &&
+          (isIssue
+            ? ["answer", "fix", "close"].includes(task.mode)
+            : ["review", "close"].includes(task.mode))
         : eligible(w, task.actor)),
     "access_denied",
     403,
   );
   if (stopping) return;
   const config = w.reviewBot;
-  const target = config?.settings;
+  const rule = effectiveRepositoryAutomationRule(w, task.payload.repositoryId);
   requireThat(
     config?.settings.enabled &&
       config.revision === task.reviewRevision &&
-      target,
+      rule.enabled,
     "review_configuration_changed",
     409,
   );
@@ -64,16 +98,45 @@ export function checkReview(w: Workspace, task: ReviewTask, stopping = false) {
     "review_cancelled",
     409,
   );
-  requireThat(
-    task.automatic ? target.autoReview : target.acceptRequests,
-    "review_requests_disabled",
-    409,
-  );
-  requireThat(
-    task.mode !== "fix" || target.allowFixes,
-    "review_fixes_disabled",
-    403,
-  );
+  if (isIssue) {
+    requireThat(
+      task.automatic
+        ? task.mode === "fix"
+          ? rule.issueAutoFix
+          : rule.issueAutoReply || rule.issueAutoFix
+        : rule.issueAcceptRequests,
+      "review_requests_disabled",
+      409,
+    );
+    requireThat(
+      task.mode !== "fix" ||
+        rule.issueAutoFix ||
+        (!task.automatic && rule.allowFixes),
+      "review_fixes_disabled",
+      403,
+    );
+    requireThat(
+      task.mode !== "close" || rule.issueAllowAutoClose || rule.allowAutoClose,
+      "review_close_disabled",
+      403,
+    );
+  } else {
+    requireThat(
+      task.automatic ? rule.autoReview : rule.acceptRequests,
+      "review_requests_disabled",
+      409,
+    );
+    requireThat(
+      task.mode !== "fix" || rule.allowFixes,
+      "review_fixes_disabled",
+      403,
+    );
+    requireThat(
+      task.mode !== "close" || rule.allowAutoClose,
+      "review_close_disabled",
+      403,
+    );
+  }
   const connection = w.github;
   requireThat(
     connection?.installationId === task.payload.installationId &&
@@ -99,7 +162,7 @@ export function checkReview(w: Workspace, task: ReviewTask, stopping = false) {
       w,
       task.actor,
       task.payload.repositoryId,
-      task.mode === "fix",
+      task.mode === "fix" || task.mode === "close",
     );
   if (!task.automatic)
     requireThat(

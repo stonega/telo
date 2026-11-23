@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireThat } from "../../domain.ts";
 import {
   manageNotifications,
+  notificationEvents,
   notificationPage,
   updateNotificationSettings,
 } from "../../github/notifications.ts";
@@ -12,6 +13,8 @@ import {
   pluginNotificationInput,
   pluginNotificationPage,
 } from "../../plugins/notifications.ts";
+import { repositoryAutomationRuleSchema } from "../../review-bot/config.ts";
+import { updateRepositoryAutomationRule } from "../../review-bot/service.ts";
 import { hash } from "../../setup/credentials.ts";
 import { deploymentOrigin } from "../site.ts";
 import {
@@ -185,6 +188,62 @@ export function githubRoutes(deps: AdminRouteDeps) {
         await c.req.json(),
       ),
     ),
+  );
+  app.put(
+    "/api/admin/workspaces/:id/github/repositories/:repositoryId/rules",
+    async (c) => {
+      const admin = c.get("session").admin;
+      const id = validId(c.req.param("id"));
+      const repositoryId = z.coerce
+        .number()
+        .int()
+        .positive()
+        .safe()
+        .parse(c.req.param("repositoryId"));
+      const input = z
+        .object({
+          revision: z.number().int().nonnegative().optional(),
+          mode: z.enum(["inherit", "custom", "disabled"]).optional(),
+          rule: repositoryAutomationRuleSchema.partial().optional(),
+          notificationAction: z
+            .enum(["subscribe", "pause", "resume", "delete"])
+            .optional(),
+          notificationEvents: z
+            .array(z.enum(notificationEvents))
+            .min(1)
+            .max(2)
+            .optional(),
+        })
+        .strict()
+        .parse(await c.req.json());
+      await store.change(id, async (w, sql) => {
+        const actor = workspaceActor(w, admin);
+        await sql.query(
+          "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+          [`review-settings:${w.operatorId}`],
+        );
+        updateRepositoryAutomationRule(w, actor, repositoryId, {
+          revision: input.revision,
+          mode: input.mode,
+          rule: input.rule,
+        });
+        if (input.notificationAction) {
+          requireThat(admin.telegramId, "telegram_identity_required", 403);
+          const d = await store.deployment(sql);
+          requireThat(d.bot, "bot_not_configured", 409);
+          manageNotifications(w, admin.telegramId, d.bot.id, {
+            action: input.notificationAction,
+            repository: String(repositoryId),
+            ...(input.notificationEvents
+              ? { events: input.notificationEvents }
+              : {}),
+          });
+        }
+      });
+      return c.json(
+        await github.view(admin, id, hash(sessionCookieValue(c) ?? "")),
+      );
+    },
   );
   app.get("/api/admin/workspaces/:id/github/notifications", async (c) => {
     const w = await store.read(validId(c.req.param("id")));

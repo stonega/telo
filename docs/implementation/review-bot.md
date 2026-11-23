@@ -2,8 +2,12 @@
 
 Status: implemented locally; live GitHub and Codex acceptance remains a release gate.
 
-Review Bot is a built-in plugin at **Plugins → Review Bot**. It automatically
-reviews PRs in the workspace’s connected GitHub repositories and accepts directly addressed GitHub comments.
+Review Bot is built into Telo's GitHub App connection (**Manage GitHub** per-repository
+rules, `/admin/plugins/review-bot` workspace defaults and activity, and the
+`manage_github_repository_rules` Telegram chat tool). It automatically reviews PRs,
+optionally auto-closes non-compliant PRs, automatically replies to and fixes GitHub
+Issues, and accepts directly addressed `@bot` comments on both PRs and Issues in the
+workspace’s connected GitHub repositories.
 Its primary review framework is [Open Code Review](https://open-codereview.ai/docs)
 (OCR), using the official [delegation workflow](https://github.com/alibaba/open-code-review/blob/main/pages/src/content/docs/en/integrations/delegate.md).
 OCR selects reviewable files and resolves review rules; Codex supplies the analysis

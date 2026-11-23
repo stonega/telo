@@ -1,8 +1,12 @@
 export function reviewMention(
   body: string,
   handle: string,
+  targetKind: "pull_request" | "issue" = "pull_request",
 ):
-  | { mode: "review" | "answer" | "fix" | "status" | "cancel"; text: string }
+  | {
+      mode: "review" | "answer" | "fix" | "close" | "status" | "cancel";
+      text: string;
+    }
   | undefined {
   // Only a directly addressed line can authorize work; quoted/code text is data.
   let fence: string | undefined;
@@ -29,20 +33,29 @@ export function reviewMention(
     const rest = text.slice(prefix.length);
     if (rest && !/^[\s,:]/.test(rest)) continue;
     const request = rest.replace(/^[\s,:]+/, "").trim();
-    if (!request) return { mode: "review", text: "Review this pull request." };
+    if (!request)
+      return targetKind === "issue"
+        ? { mode: "answer", text: "Analyze and reply to this issue." }
+        : { mode: "review", text: "Review this pull request." };
     const command = request.split(/\s/)[0]?.toLowerCase();
     const mode =
       command === "cancel" || command === "stop"
         ? "cancel"
         : command === "status"
           ? "status"
-          : command === "review" || command === "rereview"
-            ? "review"
-            : /^(?:(?:please|can you|could you|would you)\s+)?(?:fix|implement|finish|address)\b/i.test(
-                  request,
-                )
-              ? "fix"
-              : "answer";
+          : command === "close" ||
+              /^(?:(?:please|can you|could you|would you)\s+)?close\b/i.test(
+                request,
+              )
+            ? "close"
+            : (command === "review" || command === "rereview") &&
+                targetKind === "pull_request"
+              ? "review"
+              : /^(?:(?:please|can you|could you|would you)\s+)?(?:fix|implement|finish|address|resolve|repair)\b/i.test(
+                    request,
+                  )
+                ? "fix"
+                : "answer";
     return {
       mode,
       text: [request, ...bodyLines.slice(index + 1)].join("\n").trim(),

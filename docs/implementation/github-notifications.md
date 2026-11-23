@@ -51,7 +51,14 @@ production rollout remain separate acceptance gates.
 
 `manage_github_notifications` accepts `list|subscribe|pause|resume|delete`, a connected
 repository name/ID, optional `pull_request|issues` events and the current user's
-request quote. It rejects group requests, workflows, stale run fences, changed bots
+request quote. `manage_github_repository_rules` extends this with per-repository
+PR/Issue automation rules (`autoReview`, `allowAutoClose`, `allowFixes`,
+`prTriggerAuthors`, `prInstructions`, `issueAutoReply`, `issueAutoFix`,
+`issueAllowAutoClose`, `issueAcceptRequests`, `issueTriggerAuthors`,
+`issueTriggerLabels`, `issueInstructions`, `instructions`) and integrated personal
+notification actions in a single tool call, also manageable from **Manage GitHub**
+(`PUT /api/admin/workspaces/:id/github/repositories/:repositoryId/rules`).
+It rejects group requests, workflows, stale run fences, changed bots
 and quotes absent from the current request. Registration is local and included in
 the combined production-factory startup fixture. No new dependency was added.
 

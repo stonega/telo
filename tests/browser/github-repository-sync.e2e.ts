@@ -26,10 +26,74 @@ async function fixture(page: Page) {
     calls: 0,
     syncCalls: 0,
     lastSyncBody: undefined as Record<string, unknown> | undefined,
+    ruleCalls: 0,
+    lastRuleBody: undefined as Record<string, unknown> | undefined,
     unavailable: false,
   };
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (
+      path.startsWith(`${endpoint}/repositories/`) &&
+      path.endsWith("/rules") &&
+      route.request().method() === "PUT"
+    ) {
+      state.ruleCalls++;
+      const repoId = Number(path.split("/").at(-2));
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      state.lastRuleBody = body;
+      const rule = (body.rule ?? {}) as Record<string, unknown>;
+      data.repositoryRules = {
+        ...(data.repositoryRules ?? {}),
+        [String(repoId)]: {
+          enabled: body.mode !== "disabled",
+          hasOverride: body.mode !== "inherit",
+          autoReview: Boolean(rule.autoReview ?? true),
+          allowAutoClose: Boolean(rule.allowAutoClose ?? false),
+          acceptRequests: Boolean(rule.acceptRequests ?? true),
+          allowFixes: Boolean(rule.allowFixes ?? false),
+          prTriggerAuthors:
+            (rule.prTriggerAuthors as
+              | "all"
+              | "collaborators"
+              | "maintainers") ?? "all",
+          prInstructions: rule.prInstructions as string | undefined,
+          issueAutoReply: Boolean(rule.issueAutoReply ?? false),
+          issueAutoFix: Boolean(rule.issueAutoFix ?? false),
+          issueAllowAutoClose: Boolean(rule.issueAllowAutoClose ?? false),
+          issueAcceptRequests: Boolean(rule.issueAcceptRequests ?? false),
+          issueTriggerAuthors:
+            (rule.issueTriggerAuthors as
+              | "all"
+              | "collaborators"
+              | "maintainers") ?? "all",
+          issueTriggerLabels: (rule.issueTriggerLabels as string[]) ?? [],
+          issueInstructions: rule.issueInstructions as string | undefined,
+          instructions: rule.instructions as string | undefined,
+        },
+      };
+      if (body.notificationAction === "subscribe") {
+        data.subscriptions = [
+          {
+            id: "sub-1",
+            actor: "101",
+            repositoryId: repoId,
+            repository: `example/repository-${repoId}`,
+            installationId: 501,
+            connectionRevision: 1,
+            botId: "900",
+            events: (body.notificationEvents as (
+              | "pull_request"
+              | "issues"
+            )[]) ?? ["pull_request", "issues"],
+            enabled: true,
+            revision: 1,
+            since: new Date().toISOString(),
+          },
+        ];
+      }
+      await route.fulfill({ json: data });
+      return;
+    }
     if (path === `${endpoint}/sync` && route.request().method() === "POST") {
       state.syncCalls++;
       const body = route.request().postDataJSON() as Record<string, unknown>;
@@ -314,4 +378,64 @@ test("operator can enable all-repository auto-sync and manually sync from Manage
   await page.screenshot({
     path: `${screenshotDir}/github-sync-mobile-dark.png`,
   });
+});
+
+test("Manage GitHub opens per-repository automation rules and notification modal and shows saved summary without inline forms", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const { dialog, state } = await fixture(page);
+  await dialog
+    .getByRole("button", { name: "Configure example/repository-1" })
+    .click();
+  const ruleDialog = page.getByRole("dialog", {
+    name: "Configure example/repository-1",
+  });
+  await expect(ruleDialog).toBeVisible();
+  await ruleDialog.getByLabel("Automation mode").click();
+  await page
+    .getByRole("option", { name: "Custom repository rules", exact: true })
+    .click();
+  await ruleDialog
+    .getByLabel("Allow automatic PR closing when rules match")
+    .check();
+  await ruleDialog
+    .getByLabel("PR natural-language rules (optional)")
+    .fill("Close PRs without a linked issue.");
+  await ruleDialog
+    .getByLabel("Automatically analyze and reply to new issues")
+    .check();
+  await ruleDialog
+    .getByLabel("Automatically fix issues and open a pull request")
+    .check();
+  await ruleDialog
+    .getByLabel("Issue natural-language rules (optional)")
+    .fill("Reply in Chinese and auto-fix reproducible bugs.");
+  await ruleDialog.getByLabel("Personal Telegram notifications").click();
+  await page
+    .getByRole("option", { name: "Subscribe to notifications", exact: true })
+    .click();
+  await ruleDialog.getByRole("button", { name: "Save rules" }).click();
+  await expect(ruleDialog).toHaveCount(0);
+  expect(state.ruleCalls).toBe(1);
+  expect(state.lastRuleBody).toMatchObject({
+    mode: "custom",
+    notificationAction: "subscribe",
+    rule: {
+      autoReview: true,
+      allowAutoClose: true,
+      prInstructions: "Close PRs without a linked issue.",
+      issueAutoReply: true,
+      issueAutoFix: true,
+      issueInstructions: "Reply in Chinese and auto-fix reproducible bugs.",
+    },
+  });
+  const card = dialog
+    .getByRole("article", { name: "example/repository-1" })
+    .first();
+  await expect(card).toContainText("PR: auto-review, auto-close");
+  await expect(card).toContainText("Issue: auto-reply, auto-fix");
+  await expect(card).toContainText("Natural-language rules");
+  await expect(card).toContainText("Notifications: PRs & issues");
+  await expect(card.locator("input,select,textarea,form")).toHaveCount(0);
 });

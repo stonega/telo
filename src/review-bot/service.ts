@@ -15,19 +15,104 @@ import { ModelProviders } from "../models/service.ts";
 import { fingerprint } from "../setup/credentials.ts";
 import { audit } from "../workspaces/policy.ts";
 import {
+  effectiveRepositoryAutomationRule,
   emptyReview,
   type ReviewPage,
   type ReviewTask,
+  repositoryAutomationRuleSchema,
   reviewSave,
   reviewTerminal,
 } from "./config.ts";
 import { reviewMention } from "./mentions.ts";
 import {
   checkReview,
+  checkTriggerAuthor,
   reviewActor,
   reviewAuthority,
   reviewDestination,
 } from "./policy.ts";
+
+export const repositoryRuleUpdateSchema = z
+  .object({
+    revision: z.number().int().nonnegative().optional(),
+    mode: z.enum(["inherit", "custom", "disabled"]).optional(),
+    rule: repositoryAutomationRuleSchema.partial().optional(),
+  })
+  .strict();
+export type RepositoryRuleUpdate = z.infer<typeof repositoryRuleUpdateSchema>;
+
+export function updateRepositoryAutomationRule(
+  w: Workspace,
+  actor: string,
+  repositoryId: number,
+  raw: unknown,
+) {
+  const input = repositoryRuleUpdateSchema.parse(raw);
+  const repository = w.github?.repositories.find((r) => r.id === repositoryId);
+  requireThat(
+    repository && !repository.archived && !repository.disabled,
+    "github_repository_not_connected",
+    404,
+  );
+  const currentRevision = w.reviewBot?.revision ?? 0;
+  if (input.revision !== undefined) {
+    requireThat(input.revision === currentRevision, "version_conflict", 409);
+  }
+  const hadReviewBot = !!w.reviewBot?.settings.enabled;
+  const currentSettings = w.reviewBot?.settings ?? {
+    ...emptyReview,
+    autoReview: false,
+  };
+  const rules = { ...(currentSettings.repositoryRules ?? {}) };
+  const key = String(repositoryId);
+  if (input.mode === "inherit") {
+    delete rules[key];
+  } else if (input.mode === "disabled") {
+    rules[key] = repositoryAutomationRuleSchema.parse({
+      ...(rules[key] ?? {}),
+      ...(input.rule ?? {}),
+      enabled: false,
+    });
+  } else {
+    rules[key] = repositoryAutomationRuleSchema.parse({
+      ...(rules[key] ?? {}),
+      ...(input.rule ?? {}),
+      enabled: input.rule?.enabled ?? true,
+    });
+  }
+  const hasAnyActiveRule = Object.values(rules).some((r) => r.enabled);
+  const canEnableReviewBot = Boolean(
+    w.github?.installationId && w.coding?.settings.enabled,
+  );
+  const nextSettings = {
+    ...currentSettings,
+    enabled: hadReviewBot || (hasAnyActiveRule && canEnableReviewBot),
+    ...(Object.keys(rules).length > 0 ? { repositoryRules: rules } : {}),
+  };
+  if (Object.keys(rules).length === 0) {
+    delete nextSettings.repositoryRules;
+  }
+  w.reviewBot = {
+    revision: currentRevision + 1,
+    settings: nextSettings,
+  };
+  for (const task of w.reviewTasks ?? []) {
+    if (
+      task.payload.repositoryId === repositoryId &&
+      !reviewTerminal(task.state)
+    ) {
+      task.cancelRequested = true;
+    }
+  }
+  audit(
+    w,
+    actor,
+    "review.repository_rule_updated",
+    String(repositoryId),
+    w.reviewBot.revision,
+  );
+  return effectiveRepositoryAutomationRule(w, repositoryId);
+}
 
 const githubActor = z.object({
   id: z.number().int().positive().safe(),
@@ -41,6 +126,7 @@ const eventSchema = z.object({
     full_name: z.string(),
   }),
   sender: githubActor,
+  label: z.object({ name: z.string().min(1).max(100) }).optional(),
   pull_request: z
     .object({
       number: z.number().int().positive(),
@@ -51,6 +137,12 @@ const eventSchema = z.object({
   issue: z
     .object({
       number: z.number().int().positive(),
+      title: z.string().max(4096).optional(),
+      body: z.string().max(20000).nullable().optional(),
+      state: z.string().optional(),
+      labels: z
+        .array(z.union([z.string(), z.object({ name: z.string() })]))
+        .optional(),
       pull_request: z.unknown().optional(),
     })
     .optional(),
@@ -156,6 +248,21 @@ export class ReviewService {
     });
     return this.view(admin, workspaceId);
   }
+  async saveRepositoryRule(
+    admin: Admin,
+    workspaceId: string,
+    repositoryId: number,
+    value: unknown,
+  ) {
+    await this.store.change(workspaceId, async (w, sql) => {
+      reviewAuthority(w, admin);
+      await sql.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+        `review-settings:${w.operatorId}`,
+      ]);
+      updateRepositoryAutomationRule(w, admin.id, repositoryId, value);
+    });
+    return this.view(admin, workspaceId);
+  }
   async accept(
     operatorId: string,
     event: string,
@@ -175,6 +282,7 @@ export class ReviewService {
     if (
       ![
         "pull_request",
+        "issues",
         "issue_comment",
         "pull_request_review_comment",
         "installation",
@@ -249,16 +357,32 @@ export class ReviewService {
         if (!receipt.rowCount) return;
         w.reviewTasks ??= [];
         const tasks = w.reviewTasks;
+        const isIssueTarget =
+          event === "issues" ||
+          (event === "issue_comment" &&
+            !!data.issue &&
+            data.issue.pull_request === undefined);
+        const targetKind: "pull_request" | "issue" = isIssueTarget
+          ? "issue"
+          : "pull_request";
         const number =
           data.pull_request?.number ??
-          (data.issue?.pull_request ? data.issue.number : undefined);
+          (isIssueTarget
+            ? data.issue?.number
+            : data.issue?.pull_request
+              ? data.issue.number
+              : undefined);
         if (!number) return;
+        if (event === "issues" && data.issue?.pull_request !== undefined)
+          return;
+        const rule = effectiveRepositoryAutomationRule(w, repositoryId);
         if (
           event === "pull_request" &&
           ["closed", "converted_to_draft"].includes(data.action)
         ) {
           for (const t of tasks)
             if (
+              (t.targetKind ?? "pull_request") === "pull_request" &&
               t.number === number &&
               t.payload.repositoryId === repositoryId &&
               (data.action === "closed" || t.automatic)
@@ -266,19 +390,36 @@ export class ReviewService {
               t.cancelRequested = true;
           return;
         }
+        if (event === "issues" && data.action === "closed") {
+          for (const t of tasks)
+            if (
+              t.targetKind === "issue" &&
+              t.number === number &&
+              t.payload.repositoryId === repositoryId
+            )
+              t.cancelRequested = true;
+          return;
+        }
+        if (!rule.enabled) return;
         let mode: ReviewTask["mode"],
           actor: string,
           statusOnly: boolean | undefined,
+          autoFixFollowup: boolean | undefined,
           githubUserId: number | undefined,
           text: string,
           source: ReviewTask["sources"][number] | undefined;
-        const automatic = event === "pull_request";
+        const automatic = event === "pull_request" || event === "issues";
         let key = automatic
-          ? `auto:${repositoryId}:${number}:${data.pull_request?.head.sha}`
+          ? targetKind === "issue"
+            ? `auto-issue:${repositoryId}:${number}:${data.action === "labeled" ? `label:${data.label?.name?.toLowerCase() ?? delivery}` : "open"}`
+            : `auto:${repositoryId}:${number}:${data.pull_request?.head.sha}`
           : `comment:${event}:${data.comment?.id}`;
         if (tasks.some((t) => t.key === key)) {
           const resumable =
-            automatic && ["reopened", "ready_for_review"].includes(data.action);
+            automatic &&
+            (targetKind === "issue"
+              ? ["reopened", "labeled"].includes(data.action)
+              : ["reopened", "ready_for_review"].includes(data.action));
           const existing = tasks.filter(
             (t) => t.key === key || t.key.startsWith(`${key}:`),
           );
@@ -289,30 +430,95 @@ export class ReviewService {
             return;
           key = `${key}:${delivery}`;
         }
-        if (automatic) {
+        if (automatic && targetKind === "pull_request") {
           if (
-            !target.autoReview ||
+            !rule.autoReview ||
             data.pull_request?.draft ||
             !["opened", "synchronize", "reopened", "ready_for_review"].includes(
               data.action,
             )
           )
             return;
+          const allowedActor = checkTriggerAuthor(
+            w,
+            data.sender.id,
+            repositoryId,
+            rule.prTriggerAuthors,
+          );
+          if (!allowedActor) return;
           mode = "review";
-          actor = w.operatorId;
-          text = "Review this pull request.";
+          actor = allowedActor;
+          text = rule.prInstructions
+            ? `Review this pull request.\n\nRepository PR rules:\n${rule.prInstructions}`
+            : "Review this pull request.";
           for (const t of tasks)
             if (
               t.automatic &&
+              (t.targetKind ?? "pull_request") === "pull_request" &&
+              t.payload.repositoryId === repositoryId &&
+              t.number === number &&
+              !reviewTerminal(t.state)
+            )
+              t.cancelRequested = true;
+        } else if (automatic && targetKind === "issue") {
+          if (
+            (!rule.issueAutoReply && !rule.issueAutoFix) ||
+            !["opened", "reopened", "labeled"].includes(data.action)
+          )
+            return;
+          const requiredLabels = rule.issueTriggerLabels.map((l) =>
+            l.toLowerCase(),
+          );
+          if (data.action === "labeled" && requiredLabels.length === 0) return;
+          if (requiredLabels.length > 0) {
+            const candidateLabels =
+              data.action === "labeled"
+                ? data.label?.name
+                  ? [data.label.name.toLowerCase()]
+                  : []
+                : (data.issue?.labels ?? []).map((l) =>
+                    (typeof l === "string" ? l : l.name).toLowerCase(),
+                  );
+            if (!candidateLabels.some((l) => requiredLabels.includes(l)))
+              return;
+          }
+          const allowedActor = checkTriggerAuthor(
+            w,
+            data.sender.id,
+            repositoryId,
+            rule.issueTriggerAuthors,
+          );
+          if (!allowedActor) return;
+          actor = allowedActor;
+          if (rule.issueAutoReply) {
+            mode = "answer";
+            autoFixFollowup = rule.issueAutoFix || undefined;
+            text = rule.issueInstructions
+              ? `Analyze and reply to this issue.\n\nRepository issue rules:\n${rule.issueInstructions}`
+              : "Analyze and reply to this issue.";
+          } else {
+            mode = "fix";
+            text = rule.issueInstructions
+              ? `Investigate and fix this issue, then open a pull request.\n\nRepository issue rules:\n${rule.issueInstructions}`
+              : "Investigate and fix this issue, then open a pull request.";
+          }
+          for (const t of tasks)
+            if (
+              t.automatic &&
+              t.targetKind === "issue" &&
               t.payload.repositoryId === repositoryId &&
               t.number === number &&
               !reviewTerminal(t.state)
             )
               t.cancelRequested = true;
         } else {
+          const acceptsComments =
+            targetKind === "issue"
+              ? rule.issueAcceptRequests
+              : rule.acceptRequests;
           if (
             data.action !== "created" ||
-            !target.acceptRequests ||
+            !acceptsComments ||
             !data.comment ||
             data.comment.user.type !== "User" ||
             data.sender.id !== data.comment.user.id
@@ -321,6 +527,7 @@ export class ReviewService {
           const mention = reviewMention(
             data.comment.body,
             `${app.config.slug}[bot]`,
+            targetKind,
           );
           if (!mention) return;
           try {
@@ -328,7 +535,7 @@ export class ReviewService {
               w,
               data.comment.user.id,
               repositoryId,
-              mention.mode === "fix",
+              mention.mode === "fix" || mention.mode === "close",
             );
           } catch {
             return;
@@ -337,6 +544,7 @@ export class ReviewService {
             .reverse()
             .find(
               (t) =>
+                (t.targetKind ?? "pull_request") === targetKind &&
                 t.payload.repositoryId === repositoryId &&
                 t.number === number &&
                 !reviewTerminal(t.state),
@@ -355,8 +563,8 @@ export class ReviewService {
             hash: fingerprint(data.comment.body),
             githubId: githubUserId,
           };
-          if (mention.mode === "fix") {
-            if (!target.allowFixes) return;
+          if (mention.mode === "fix" && targetKind === "pull_request") {
+            if (!rule.allowFixes) return;
             if (
               await appendGitHubDevelopment(sql, w, {
                 installationId: data.installation.id,
@@ -397,9 +605,27 @@ export class ReviewService {
             active.updatedAt = new Date().toISOString();
             return;
           }
-          mode = mention.mode === "status" ? "answer" : mention.mode;
+          mode =
+            mention.mode === "status"
+              ? "answer"
+              : targetKind === "issue" && mention.mode === "review"
+                ? "answer"
+                : mention.mode;
           statusOnly = mention.mode === "status";
-          if (mode === "fix" && !target.allowFixes) return;
+          if (mode === "fix") {
+            const allowFix =
+              targetKind === "issue"
+                ? rule.issueAutoFix || rule.allowFixes
+                : rule.allowFixes;
+            if (!allowFix) return;
+          }
+          if (mode === "close") {
+            const allowClose =
+              targetKind === "issue"
+                ? rule.issueAllowAutoClose || rule.allowAutoClose
+                : rule.allowAutoClose;
+            if (!allowClose) return;
+          }
           text = mention.text;
         }
         if (
@@ -432,11 +658,13 @@ export class ReviewService {
             baseBranch: branchName.parse(repository.default_branch),
             backend: "podman",
             authMode: coding.settings.authMode,
-            title: `PR #${number}`,
+            title: `${targetKind === "issue" ? "Issue" : "PR"} #${number}`,
             body: text.slice(0, 2500),
           }),
           reviewRevision: w.reviewBot.revision,
           number,
+          ...(targetKind === "issue" ? { targetKind: "issue" as const } : {}),
+          ...(autoFixFollowup ? { autoFixFollowup: true } : {}),
           mode,
           statusOnly,
           automatic,
@@ -456,8 +684,14 @@ export class ReviewService {
           consumedRevision: 0,
           state: "queued",
           attemptId: randomUUID(),
-          headSha: automatic ? data.pull_request?.head.sha : undefined,
-          progress: automatic ? undefined : { state: "pending" },
+          headSha:
+            automatic && targetKind === "pull_request"
+              ? data.pull_request?.head.sha
+              : undefined,
+          progress:
+            automatic && !(targetKind === "issue" && mode === "fix")
+              ? undefined
+              : { state: "pending" },
           createdAt: at,
           updatedAt: at,
         };

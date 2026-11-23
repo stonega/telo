@@ -13,6 +13,7 @@ import {
   automaticMaintainerRepositories,
   githubNotificationSettings,
   manageNotifications,
+  manageRepositoryRules,
 } from "../github/notifications.ts";
 import {
   authorizePreferenceMutation,
@@ -174,6 +175,7 @@ export function applicationTools(
             "propose_workflow",
             "manage_telegram",
             "manage_github_notifications",
+            "manage_github_repository_rules",
             "manage_plugin_notifications",
           ].includes(name) ||
             (name === "react_to_message" && !r.workflowId && !!r.threadId) ||
@@ -361,6 +363,101 @@ export function applicationTools(
           ),
           subscriptions,
           destination: "your private main chat",
+        };
+      },
+      notificationRequest,
+    ),
+    bind(
+      "manage_github_repository_rules",
+      "Configure per-repository GitHub App automation rules and personal Telegram notifications in one place. Natural-language rules take priority within enabled capability boundaries: use prInstructions, issueInstructions, or shared instructions to express custom policies (for example: when to auto-close non-compliant PRs, how to reply to issues, or which bug issues should trigger an automatic code fix and PR). Supported capabilities per connected repository: PR autoReview, PR allowAutoClose, PR acceptRequests (@bot comments), PR allowFixes (@bot fix), prTriggerAuthors (all/collaborators/maintainers), prInstructions; Issue issueAutoReply, issueAutoFix (automatically investigate, fix code, run checks, and open a PR linked to the issue), issueAllowAutoClose, issueAcceptRequests (@bot comments on issues), issueTriggerAuthors, issueTriggerLabels, issueInstructions; shared instructions; and optional notificationAction (subscribe/pause/resume/delete) + notificationEvents (pull_request/issues). Actions: list, configure, disable, reset (inherit workspace default). Resolve repository by owner/name or numeric repository ID. Use only in a private chat for an explicit current user request and quote that request verbatim in requestQuote.",
+      Type.Object(
+        {
+          action: Type.Union(
+            ["list", "configure", "disable", "reset"].map((v) =>
+              Type.Literal(v),
+            ),
+          ),
+          repository: Type.Optional(Type.String({ maxLength: 150 })),
+          autoReview: Type.Optional(Type.Boolean()),
+          allowAutoClose: Type.Optional(Type.Boolean()),
+          acceptRequests: Type.Optional(Type.Boolean()),
+          allowFixes: Type.Optional(Type.Boolean()),
+          prTriggerAuthors: Type.Optional(
+            Type.Union([
+              Type.Literal("all"),
+              Type.Literal("collaborators"),
+              Type.Literal("maintainers"),
+            ]),
+          ),
+          prInstructions: Type.Optional(Type.String({ maxLength: 4000 })),
+          issueAutoReply: Type.Optional(Type.Boolean()),
+          issueAutoFix: Type.Optional(Type.Boolean()),
+          issueAllowAutoClose: Type.Optional(Type.Boolean()),
+          issueAcceptRequests: Type.Optional(Type.Boolean()),
+          issueTriggerAuthors: Type.Optional(
+            Type.Union([
+              Type.Literal("all"),
+              Type.Literal("collaborators"),
+              Type.Literal("maintainers"),
+            ]),
+          ),
+          issueTriggerLabels: Type.Optional(
+            Type.Array(Type.String({ minLength: 1, maxLength: 100 }), {
+              maxItems: 20,
+            }),
+          ),
+          issueInstructions: Type.Optional(Type.String({ maxLength: 4000 })),
+          instructions: Type.Optional(Type.String({ maxLength: 4000 })),
+          notificationAction: Type.Optional(
+            Type.Union(
+              ["subscribe", "pause", "resume", "delete"].map((v) =>
+                Type.Literal(v),
+              ),
+            ),
+          ),
+          notificationEvents: Type.Optional(
+            Type.Array(
+              Type.Union([
+                Type.Literal("pull_request"),
+                Type.Literal("issues"),
+              ]),
+              { minItems: 1, maxItems: 2 },
+            ),
+          ),
+          requestQuote: Type.String({ minLength: 1, maxLength: 4000 }),
+        },
+        { additionalProperties: false },
+      ),
+      async (w, r, a, sql) => {
+        requireThat(
+          !r.workflowId && r.chatId === r.actor,
+          "use_private_chat",
+          403,
+        );
+        const deployment = await store.deployment(sql);
+        requireThat(
+          deployment.active &&
+            !deployment.paused &&
+            deployment.bot &&
+            w.threads?.some(
+              (t) => t.id === r.threadId && t.botId === deployment.bot?.id,
+            ),
+          "tool_policy_denied",
+          403,
+        );
+        const { requestQuote: _quote, ...input } = a;
+        const repositories = manageRepositoryRules(
+          w,
+          r.actor,
+          deployment.bot.id,
+          input,
+        );
+        return {
+          reviewBotEnabled: w.reviewBot?.settings.enabled ?? false,
+          codingEnabled: w.coding?.settings.enabled ?? false,
+          autoNotifyMaintainers:
+            githubNotificationSettings(w).autoNotifyMaintainers,
+          repositories,
         };
       },
       notificationRequest,

@@ -3,11 +3,19 @@ import { z } from "zod";
 import type { Sql } from "../db/pool.ts";
 import type { Store } from "../db/repositories.ts";
 import { type Delivery, requireThat, type Workspace } from "../domain.ts";
+import {
+  type EffectiveRepositoryRule,
+  effectiveRepositoryAutomationRule,
+  repositoryAutomationRuleSchema,
+  triggerAuthorsSchema,
+} from "../review-bot/config.ts";
+import { updateRepositoryAutomationRule } from "../review-bot/service.ts";
 import { audit, authorize, eligible } from "../workspaces/policy.ts";
 import { deliver } from "../workspaces/service.ts";
 import { githubRepositoryScopeCurrent } from "./config.ts";
 import {
   authorizeRepository,
+  authorizeVerifiedRepository,
   repositoryAccess,
   repositoryMaintainer,
 } from "./user-access.ts";
@@ -152,6 +160,167 @@ export const notificationInput = z
   })
   .strict();
 export type NotificationInput = z.infer<typeof notificationInput>;
+
+export const repositoryRuleToolInput = z
+  .object({
+    action: z.enum(["list", "configure", "disable", "reset"]),
+    repository: z.string().trim().min(1).max(150).optional(),
+    autoReview: z.boolean().optional(),
+    allowAutoClose: z.boolean().optional(),
+    acceptRequests: z.boolean().optional(),
+    allowFixes: z.boolean().optional(),
+    prTriggerAuthors: triggerAuthorsSchema.optional(),
+    prInstructions: z.string().trim().max(4000).optional(),
+    issueAutoReply: z.boolean().optional(),
+    issueAutoFix: z.boolean().optional(),
+    issueAllowAutoClose: z.boolean().optional(),
+    issueAcceptRequests: z.boolean().optional(),
+    issueTriggerAuthors: triggerAuthorsSchema.optional(),
+    issueTriggerLabels: z
+      .array(z.string().trim().min(1).max(100))
+      .max(20)
+      .optional(),
+    issueInstructions: z.string().trim().max(4000).optional(),
+    instructions: z.string().trim().max(4000).optional(),
+    notificationAction: z
+      .enum(["subscribe", "pause", "resume", "delete"])
+      .optional(),
+    notificationEvents: z
+      .array(z.enum(notificationEvents))
+      .min(1)
+      .max(2)
+      .optional(),
+  })
+  .strict();
+export type RepositoryRuleToolInput = z.infer<typeof repositoryRuleToolInput>;
+
+export function manageRepositoryRules(
+  w: Workspace,
+  actor: string,
+  botId: string,
+  value: unknown,
+) {
+  authorize(w, actor);
+  const input = repositoryRuleToolInput.parse(value);
+  const viewAll = () =>
+    (w.github?.repositories ?? [])
+      .filter(
+        (r) => !r.archived && !r.disabled && repositoryAccess(w, actor, r.id),
+      )
+      .map((r) => ({
+        repositoryId: r.id,
+        repository: r.full_name,
+        rule: effectiveRepositoryAutomationRule(w, r.id),
+        subscription: (w.githubNotifications ?? []).find(
+          (s) => s.actor === actor && s.repositoryId === r.id,
+        ),
+      }));
+  if (input.action === "list") return viewAll();
+  requireThat(input.repository, "notification_repository_required");
+  const repository = w.github?.repositories.find(
+    (r) =>
+      r.full_name.toLowerCase() === input.repository?.toLowerCase() ||
+      String(r.id) === input.repository,
+  );
+  requireThat(
+    repository &&
+      !repository.archived &&
+      !repository.disabled &&
+      w.github?.installationId,
+    "github_repository_not_connected",
+    409,
+  );
+  // Either workspace admin/owner or verified GitHub collaborator with write/maintain/admin access.
+  if (!eligible(w, actor, true)) {
+    authorizeVerifiedRepository(w, actor, repository.id, true);
+  }
+  const hasRuleFields = [
+    input.autoReview,
+    input.allowAutoClose,
+    input.acceptRequests,
+    input.allowFixes,
+    input.prTriggerAuthors,
+    input.prInstructions,
+    input.issueAutoReply,
+    input.issueAutoFix,
+    input.issueAllowAutoClose,
+    input.issueAcceptRequests,
+    input.issueTriggerAuthors,
+    input.issueTriggerLabels,
+    input.issueInstructions,
+    input.instructions,
+  ].some((v) => v !== undefined);
+
+  if (
+    input.action === "reset" ||
+    input.action === "disable" ||
+    hasRuleFields ||
+    !input.notificationAction
+  ) {
+    const partialRule = repositoryAutomationRuleSchema.partial().parse({
+      ...(input.autoReview !== undefined
+        ? { autoReview: input.autoReview }
+        : {}),
+      ...(input.allowAutoClose !== undefined
+        ? { allowAutoClose: input.allowAutoClose }
+        : {}),
+      ...(input.acceptRequests !== undefined
+        ? { acceptRequests: input.acceptRequests }
+        : {}),
+      ...(input.allowFixes !== undefined
+        ? { allowFixes: input.allowFixes }
+        : {}),
+      ...(input.prTriggerAuthors !== undefined
+        ? { prTriggerAuthors: input.prTriggerAuthors }
+        : {}),
+      ...(input.prInstructions !== undefined
+        ? { prInstructions: input.prInstructions }
+        : {}),
+      ...(input.issueAutoReply !== undefined
+        ? { issueAutoReply: input.issueAutoReply }
+        : {}),
+      ...(input.issueAutoFix !== undefined
+        ? { issueAutoFix: input.issueAutoFix }
+        : {}),
+      ...(input.issueAllowAutoClose !== undefined
+        ? { issueAllowAutoClose: input.issueAllowAutoClose }
+        : {}),
+      ...(input.issueAcceptRequests !== undefined
+        ? { issueAcceptRequests: input.issueAcceptRequests }
+        : {}),
+      ...(input.issueTriggerAuthors !== undefined
+        ? { issueTriggerAuthors: input.issueTriggerAuthors }
+        : {}),
+      ...(input.issueTriggerLabels !== undefined
+        ? { issueTriggerLabels: input.issueTriggerLabels }
+        : {}),
+      ...(input.issueInstructions !== undefined
+        ? { issueInstructions: input.issueInstructions }
+        : {}),
+      ...(input.instructions !== undefined
+        ? { instructions: input.instructions }
+        : {}),
+    });
+    updateRepositoryAutomationRule(w, actor, repository.id, {
+      mode:
+        input.action === "reset"
+          ? "inherit"
+          : input.action === "disable"
+            ? "disabled"
+            : "custom",
+      rule: partialRule,
+    });
+  }
+  if (input.notificationAction) {
+    manageNotifications(w, actor, botId, {
+      action: input.notificationAction,
+      repository: String(repository.id),
+      ...(input.notificationEvents ? { events: input.notificationEvents } : {}),
+    });
+  }
+  return viewAll();
+}
+
 export interface NotificationPage {
   canManage: boolean;
   webhookUrl?: string;
@@ -166,7 +335,11 @@ export interface NotificationPage {
     available: boolean;
     lastDelivery?: string;
   })[];
-  repositories: { id: number; full_name: string }[];
+  repositories: {
+    id: number;
+    full_name: string;
+    rule?: EffectiveRepositoryRule;
+  }[];
   webhookConfigured: boolean;
 }
 export function notificationPage(
@@ -602,7 +775,24 @@ export class GitHubNotifications {
         for (const recipient of row.recipients as NotificationRecipient[]) {
           if (!repository) continue;
           const url = `https://github.com/${repository.full_name}/${p.event === "issues" ? "issues" : "pull"}/${p.number}`;
-          const text = `${p.event === "issues" ? "📌 New issue" : "🔀 New PR"}${p.draft ? " (Draft)" : ""} · ${repository.full_name} #${p.number}\n${p.title}\nBy ${p.author}\n${url}`;
+          const rule = effectiveRepositoryAutomationRule(w, p.repositoryId);
+          const autoNotes: string[] = [];
+          if (rule.enabled && rule.hasOverride) {
+            if (p.event === "issues") {
+              if (rule.issueAutoReply && rule.issueAutoFix)
+                autoNotes.push("Auto-reply & auto-fix active");
+              else if (rule.issueAutoReply) autoNotes.push("Auto-reply active");
+              else if (rule.issueAutoFix) autoNotes.push("Auto-fix active");
+            } else if (!p.draft) {
+              if (rule.autoReview && rule.allowAutoClose)
+                autoNotes.push("Auto-review & auto-close active");
+              else if (rule.autoReview) autoNotes.push("Auto-review active");
+            }
+          }
+          const autoSuffix = autoNotes.length
+            ? `\n🤖 ${autoNotes.join(" · ")}`
+            : "";
+          const text = `${p.event === "issues" ? "📌 New issue" : "🔀 New PR"}${p.draft ? " (Draft)" : ""} · ${repository.full_name} #${p.number}\n${p.title}\nBy ${p.author}${autoSuffix}\n${url}`;
           if (recipient.kind === "maintainer") {
             const member = w.members.find((m) => m.id === recipient.actor);
             if (

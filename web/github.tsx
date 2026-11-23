@@ -2,12 +2,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import type { GitHubRepository } from "../src/github/app.ts";
 import type { GitHubPage } from "../src/github/config.ts";
+import type { NotificationEvent } from "../src/github/notifications.ts";
 import type { RepositorySyncSummary } from "../src/github/repository-sync.ts";
+import type {
+  EffectiveRepositoryRule,
+  TriggerAuthors,
+} from "../src/review-bot/config.ts";
 import {
   GitHubRegistration,
   submitGitHubManifest,
 } from "./github-registration.tsx";
-import { Modal } from "./modal.tsx";
+import { IconButton } from "./icon-button.tsx";
+import { Modal, ModalActions } from "./modal.tsx";
 import { RepositoryCard } from "./repository-card.tsx";
 import { Select } from "./select.tsx";
 import { Skeleton, SkeletonRows } from "./skeleton.tsx";
@@ -263,6 +269,28 @@ export function GitHubConnection({
   const [selected, setSelected] = useState<number[]>([]);
   const [selectAllMode, setSelectAllMode] = useState(false);
   const [showAllRepositories, setShowAllRepositories] = useState(false);
+  const [editingRule, setEditingRule] = useState<{
+    repositoryId: number;
+    fullName: string;
+    mode: "inherit" | "custom" | "disabled";
+    autoReview: boolean;
+    allowAutoClose: boolean;
+    acceptRequests: boolean;
+    allowFixes: boolean;
+    prTriggerAuthors: TriggerAuthors;
+    prInstructions: string;
+    issueAutoReply: boolean;
+    issueAutoFix: boolean;
+    issueAllowAutoClose: boolean;
+    issueAcceptRequests: boolean;
+    issueTriggerAuthors: TriggerAuthors;
+    issueTriggerLabels: string;
+    issueInstructions: string;
+    instructions: string;
+    notificationAction: "" | "subscribe" | "pause" | "resume" | "delete";
+    notificationEvents: NotificationEvent[];
+  }>();
+  const [ruleError, setRuleError] = useState("");
   const [params, setParams] = useSearchParams();
   const [internalOpen, setInternalOpen] = useState(() => params.has("github"));
   useEffect(() => {
@@ -342,7 +370,95 @@ export function GitHubConnection({
     },
     [endpoint, installation, request],
   );
-  useRepositoryRefresh(refresh, (open ?? internalOpen) && !busy);
+  useRepositoryRefresh(
+    refresh,
+    (open ?? internalOpen) && !busy && !editingRule,
+  );
+  const openRuleEditor = (repo: GitHubRepository) => {
+    const rule: EffectiveRepositoryRule = data?.repositoryRules?.[
+      String(repo.id)
+    ] ?? {
+      enabled: data?.reviewSettings?.enabled ?? false,
+      hasOverride: false,
+      autoReview: data?.reviewSettings?.autoReview ?? true,
+      allowAutoClose: data?.reviewSettings?.allowAutoClose ?? false,
+      acceptRequests: data?.reviewSettings?.acceptRequests ?? true,
+      allowFixes: data?.reviewSettings?.allowFixes ?? false,
+      prTriggerAuthors: data?.reviewSettings?.prTriggerAuthors ?? "all",
+      prInstructions: data?.reviewSettings?.prInstructions,
+      issueAutoReply: data?.reviewSettings?.issueAutoReply ?? false,
+      issueAutoFix: data?.reviewSettings?.issueAutoFix ?? false,
+      issueAllowAutoClose: data?.reviewSettings?.issueAllowAutoClose ?? false,
+      issueAcceptRequests: data?.reviewSettings?.issueAcceptRequests ?? false,
+      issueTriggerAuthors: data?.reviewSettings?.issueTriggerAuthors ?? "all",
+      issueTriggerLabels: data?.reviewSettings?.issueTriggerLabels ?? [],
+      issueInstructions: data?.reviewSettings?.issueInstructions,
+      instructions: data?.reviewSettings?.instructions,
+    };
+    const sub = data?.subscriptions?.find((s) => s.repositoryId === repo.id);
+    setRuleError("");
+    setEditingRule({
+      repositoryId: repo.id,
+      fullName: repo.full_name,
+      mode: !rule.hasOverride
+        ? "inherit"
+        : rule.enabled
+          ? "custom"
+          : "disabled",
+      autoReview: rule.autoReview,
+      allowAutoClose: rule.allowAutoClose,
+      acceptRequests: rule.acceptRequests,
+      allowFixes: rule.allowFixes,
+      prTriggerAuthors: rule.prTriggerAuthors,
+      prInstructions: rule.prInstructions ?? "",
+      issueAutoReply: rule.issueAutoReply,
+      issueAutoFix: rule.issueAutoFix,
+      issueAllowAutoClose: rule.issueAllowAutoClose,
+      issueAcceptRequests: rule.issueAcceptRequests,
+      issueTriggerAuthors: rule.issueTriggerAuthors,
+      issueTriggerLabels: rule.issueTriggerLabels.join(", "),
+      issueInstructions: rule.issueInstructions ?? "",
+      instructions: rule.instructions ?? "",
+      notificationAction: "",
+      notificationEvents: sub?.events ?? ["pull_request", "issues"],
+    });
+  };
+  const summarizeRule = (repoId: number) => {
+    const rule = data?.repositoryRules?.[String(repoId)];
+    const sub = data?.subscriptions?.find((s) => s.repositoryId === repoId);
+    const items: string[] = [];
+    if (rule?.hasOverride) {
+      if (!rule.enabled) {
+        items.push("Automation disabled");
+      } else {
+        const prParts: string[] = [];
+        if (rule.autoReview) prParts.push("auto-review");
+        if (rule.allowAutoClose) prParts.push("auto-close");
+        if (rule.allowFixes) prParts.push("fixes");
+        if (prParts.length) items.push(`PR: ${prParts.join(", ")}`);
+        const issueParts: string[] = [];
+        if (rule.issueAutoReply) issueParts.push("auto-reply");
+        if (rule.issueAutoFix) issueParts.push("auto-fix");
+        if (rule.issueAllowAutoClose) issueParts.push("auto-close");
+        if (issueParts.length) items.push(`Issue: ${issueParts.join(", ")}`);
+        if (
+          rule.prInstructions ||
+          rule.issueInstructions ||
+          rule.instructions
+        ) {
+          items.push("Natural-language rules");
+        }
+      }
+    }
+    if (sub) {
+      items.push(
+        sub.enabled
+          ? `Notifications: ${sub.events.map((e) => (e === "issues" ? "issues" : "PRs")).join(" & ")}`
+          : "Notifications paused",
+      );
+    }
+    return items.join(" · ");
+  };
   const act = async (action: () => Promise<void>) => {
     setBusy(true);
     setError("");
@@ -556,15 +672,30 @@ export function GitHubConnection({
                       {(showAllRepositories
                         ? data.connection.repositories
                         : data.connection.repositories.slice(0, 5)
-                      ).map((repo) => (
-                        <li className="repository-list-item" key={repo.id}>
-                          <RepositoryCard
-                            compact
-                            name={repo.full_name}
-                            url={`https://github.com/${repo.full_name}`}
-                          />
-                        </li>
-                      ))}
+                      ).map((repo) => {
+                        const summary = summarizeRule(repo.id);
+                        return (
+                          <li className="repository-list-item" key={repo.id}>
+                            <RepositoryCard
+                              compact
+                              name={repo.full_name}
+                              url={`https://github.com/${repo.full_name}`}
+                              actions={
+                                <IconButton
+                                  icon="edit"
+                                  label={`Configure ${repo.full_name}`}
+                                  disabled={busy}
+                                  onClick={() => openRuleEditor(repo)}
+                                />
+                              }
+                            >
+                              {summary ? (
+                                <p className="muted">{summary}</p>
+                              ) : undefined}
+                            </RepositoryCard>
+                          </li>
+                        );
+                      })}
                       {data.connection.repositories.length > 5 && (
                         <li className="repository-list-item">
                           <button
@@ -747,6 +878,413 @@ export function GitHubConnection({
               </form>
             )}
           </div>
+        </Modal>
+      )}
+      {editingRule && (
+        <Modal
+          title={`Configure ${editingRule.fullName}`}
+          busy={busy}
+          onClose={() => {
+            setEditingRule(undefined);
+            setRuleError("");
+          }}
+        >
+          <form
+            className="record-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setBusy(true);
+              setRuleError("");
+              const labels = editingRule.issueTriggerLabels
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean);
+              void request<GitHubPage>(
+                `${endpoint}/repositories/${editingRule.repositoryId}/rules`,
+                "PUT",
+                {
+                  revision: data?.reviewRevision,
+                  mode: editingRule.mode,
+                  ...(editingRule.mode === "custom"
+                    ? {
+                        rule: {
+                          enabled: true,
+                          autoReview: editingRule.autoReview,
+                          allowAutoClose: editingRule.allowAutoClose,
+                          acceptRequests: editingRule.acceptRequests,
+                          allowFixes: editingRule.allowFixes,
+                          prTriggerAuthors: editingRule.prTriggerAuthors,
+                          ...(editingRule.prInstructions.trim()
+                            ? {
+                                prInstructions:
+                                  editingRule.prInstructions.trim(),
+                              }
+                            : {}),
+                          issueAutoReply: editingRule.issueAutoReply,
+                          issueAutoFix: editingRule.issueAutoFix,
+                          issueAllowAutoClose: editingRule.issueAllowAutoClose,
+                          issueAcceptRequests: editingRule.issueAcceptRequests,
+                          issueTriggerAuthors: editingRule.issueTriggerAuthors,
+                          ...(labels.length
+                            ? { issueTriggerLabels: labels }
+                            : {}),
+                          ...(editingRule.issueInstructions.trim()
+                            ? {
+                                issueInstructions:
+                                  editingRule.issueInstructions.trim(),
+                              }
+                            : {}),
+                          ...(editingRule.instructions.trim()
+                            ? {
+                                instructions: editingRule.instructions.trim(),
+                              }
+                            : {}),
+                        },
+                      }
+                    : {}),
+                  ...(editingRule.notificationAction
+                    ? {
+                        notificationAction: editingRule.notificationAction,
+                        ...(editingRule.notificationAction === "subscribe"
+                          ? {
+                              notificationEvents:
+                                editingRule.notificationEvents,
+                            }
+                          : {}),
+                      }
+                    : {}),
+                },
+              )
+                .then((updated) => {
+                  setData(updated);
+                  setEditingRule(undefined);
+                  onUpdated?.();
+                })
+                .catch((err) => {
+                  setRuleError(explain(err));
+                })
+                .finally(() => {
+                  setBusy(false);
+                });
+            }}
+          >
+            <div className="field">
+              <label htmlFor="repo-rule-mode">Automation mode</label>
+              <Select
+                id="repo-rule-mode"
+                value={editingRule.mode}
+                disabled={busy}
+                onChange={(e) =>
+                  setEditingRule({
+                    ...editingRule,
+                    mode: e.target.value as "inherit" | "custom" | "disabled",
+                  })
+                }
+              >
+                <option value="inherit">Inherit workspace default</option>
+                <option value="custom">Custom repository rules</option>
+                <option value="disabled">
+                  Disable automation for this repository
+                </option>
+              </Select>
+            </div>
+            {editingRule.mode === "custom" && (
+              <>
+                <fieldset className="plugin-fields" disabled={busy}>
+                  <legend>Pull requests</legend>
+                  <label className="form-check">
+                    <input
+                      type="checkbox"
+                      checked={editingRule.autoReview}
+                      onChange={(e) =>
+                        setEditingRule({
+                          ...editingRule,
+                          autoReview: e.target.checked,
+                        })
+                      }
+                    />
+                    Automatically review open PRs and new commits
+                  </label>
+                  <label className="form-check">
+                    <input
+                      type="checkbox"
+                      checked={editingRule.allowAutoClose}
+                      onChange={(e) =>
+                        setEditingRule({
+                          ...editingRule,
+                          allowAutoClose: e.target.checked,
+                        })
+                      }
+                    />
+                    Allow automatic PR closing when rules match
+                  </label>
+                  <label className="form-check">
+                    <input
+                      type="checkbox"
+                      checked={editingRule.acceptRequests}
+                      onChange={(e) =>
+                        setEditingRule({
+                          ...editingRule,
+                          acceptRequests: e.target.checked,
+                        })
+                      }
+                    />
+                    Accept @bot comments on PRs
+                  </label>
+                  <label className="form-check">
+                    <input
+                      type="checkbox"
+                      checked={editingRule.allowFixes}
+                      onChange={(e) =>
+                        setEditingRule({
+                          ...editingRule,
+                          allowFixes: e.target.checked,
+                        })
+                      }
+                    />
+                    Allow @bot fix requests on PRs
+                  </label>
+                  <div className="field">
+                    <label htmlFor="repo-pr-trigger-authors">
+                      Automatic PR trigger authors
+                    </label>
+                    <Select
+                      id="repo-pr-trigger-authors"
+                      value={editingRule.prTriggerAuthors}
+                      onChange={(e) =>
+                        setEditingRule({
+                          ...editingRule,
+                          prTriggerAuthors: e.target.value as TriggerAuthors,
+                        })
+                      }
+                    >
+                      <option value="all">All authors</option>
+                      <option value="collaborators">
+                        Verified collaborators
+                      </option>
+                      <option value="maintainers">Maintainers only</option>
+                    </Select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="repo-pr-instructions">
+                      PR natural-language rules (optional)
+                    </label>
+                    <textarea
+                      id="repo-pr-instructions"
+                      rows={2}
+                      maxLength={4000}
+                      placeholder="e.g. Focus on security boundaries; automatically close PRs that modify production config or lack a linked issue."
+                      value={editingRule.prInstructions}
+                      onChange={(e) =>
+                        setEditingRule({
+                          ...editingRule,
+                          prInstructions: e.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                </fieldset>
+                <fieldset className="plugin-fields" disabled={busy}>
+                  <legend>Issues</legend>
+                  <label className="form-check">
+                    <input
+                      type="checkbox"
+                      checked={editingRule.issueAutoReply}
+                      onChange={(e) =>
+                        setEditingRule({
+                          ...editingRule,
+                          issueAutoReply: e.target.checked,
+                        })
+                      }
+                    />
+                    Automatically analyze and reply to new issues
+                  </label>
+                  <label className="form-check">
+                    <input
+                      type="checkbox"
+                      checked={editingRule.issueAutoFix}
+                      onChange={(e) =>
+                        setEditingRule({
+                          ...editingRule,
+                          issueAutoFix: e.target.checked,
+                        })
+                      }
+                    />
+                    Automatically fix issues and open a pull request
+                  </label>
+                  <label className="form-check">
+                    <input
+                      type="checkbox"
+                      checked={editingRule.issueAllowAutoClose}
+                      onChange={(e) =>
+                        setEditingRule({
+                          ...editingRule,
+                          issueAllowAutoClose: e.target.checked,
+                        })
+                      }
+                    />
+                    Allow automatic issue closing when rules match
+                  </label>
+                  <label className="form-check">
+                    <input
+                      type="checkbox"
+                      checked={editingRule.issueAcceptRequests}
+                      onChange={(e) =>
+                        setEditingRule({
+                          ...editingRule,
+                          issueAcceptRequests: e.target.checked,
+                        })
+                      }
+                    />
+                    Accept @bot comments on issues (explain, fix, close)
+                  </label>
+                  <div className="field">
+                    <label htmlFor="repo-issue-trigger-authors">
+                      Automatic issue trigger authors
+                    </label>
+                    <Select
+                      id="repo-issue-trigger-authors"
+                      value={editingRule.issueTriggerAuthors}
+                      onChange={(e) =>
+                        setEditingRule({
+                          ...editingRule,
+                          issueTriggerAuthors: e.target.value as TriggerAuthors,
+                        })
+                      }
+                    >
+                      <option value="all">All authors</option>
+                      <option value="collaborators">
+                        Verified collaborators
+                      </option>
+                      <option value="maintainers">Maintainers only</option>
+                    </Select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="repo-issue-labels">
+                      Issue trigger labels (optional, comma-separated)
+                    </label>
+                    <input
+                      id="repo-issue-labels"
+                      type="text"
+                      placeholder="e.g. bug, auto-fix"
+                      value={editingRule.issueTriggerLabels}
+                      onChange={(e) =>
+                        setEditingRule({
+                          ...editingRule,
+                          issueTriggerLabels: e.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="repo-issue-instructions">
+                      Issue natural-language rules (optional)
+                    </label>
+                    <textarea
+                      id="repo-issue-instructions"
+                      rows={2}
+                      maxLength={4000}
+                      placeholder="e.g. Reply in Chinese with root-cause analysis. If it is a reproducible bug, fix it and open a PR; if it is a question, only reply."
+                      value={editingRule.issueInstructions}
+                      onChange={(e) =>
+                        setEditingRule({
+                          ...editingRule,
+                          issueInstructions: e.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                </fieldset>
+                <div className="field">
+                  <label htmlFor="repo-shared-instructions">
+                    Shared repository rule instructions (optional)
+                  </label>
+                  <textarea
+                    id="repo-shared-instructions"
+                    rows={2}
+                    maxLength={4000}
+                    placeholder="General instructions applied to both PRs and issues in this repository."
+                    value={editingRule.instructions}
+                    onChange={(e) =>
+                      setEditingRule({
+                        ...editingRule,
+                        instructions: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+              </>
+            )}
+            <div className="field">
+              <label htmlFor="repo-notification-action">
+                Personal Telegram notifications
+              </label>
+              <Select
+                id="repo-notification-action"
+                value={editingRule.notificationAction}
+                disabled={busy}
+                onChange={(e) =>
+                  setEditingRule({
+                    ...editingRule,
+                    notificationAction: e.target.value as
+                      | ""
+                      | "subscribe"
+                      | "pause"
+                      | "resume"
+                      | "delete",
+                  })
+                }
+              >
+                <option value="">Keep current notification setting</option>
+                <option value="subscribe">Subscribe to notifications</option>
+                <option value="pause">Pause notifications</option>
+                <option value="resume">Resume notifications</option>
+                <option value="delete">Remove personal override</option>
+              </Select>
+            </div>
+            {editingRule.notificationAction === "subscribe" && (
+              <fieldset className="plugin-fields" disabled={busy}>
+                <legend>Notification events</legend>
+                {(
+                  [
+                    ["pull_request", "New PRs"],
+                    ["issues", "New issues"],
+                  ] as const
+                ).map(([ev, label]) => (
+                  <label className="form-check" key={ev}>
+                    <input
+                      type="checkbox"
+                      checked={editingRule.notificationEvents.includes(ev)}
+                      onChange={(e) => {
+                        const next = e.target.checked
+                          ? [...editingRule.notificationEvents, ev]
+                          : editingRule.notificationEvents.filter(
+                              (x) => x !== ev,
+                            );
+                        if (next.length > 0) {
+                          setEditingRule({
+                            ...editingRule,
+                            notificationEvents: next,
+                          });
+                        }
+                      }}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </fieldset>
+            )}
+            {ruleError && (
+              <p className="notice" role="alert">
+                {ruleError}
+              </p>
+            )}
+            <ModalActions>
+              <button type="submit" disabled={busy}>
+                {busy ? "Saving…" : "Save rules"}
+              </button>
+            </ModalActions>
+          </form>
         </Modal>
       )}
     </>

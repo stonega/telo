@@ -1,4 +1,9 @@
+import type {
+  EffectiveRepositoryRule,
+  ReviewSettings,
+} from "../review-bot/config.ts";
 import type { GitHubInstallation, GitHubRepository } from "./app.ts";
+import type { GitHubSubscription } from "./notifications.ts";
 export type GitHubConnection = {
   revision: number;
   /** Last connection/selection change; metadata refreshes retain this generation. */
@@ -42,4 +47,12 @@ export interface GitHubPage {
   pending: boolean;
   login?: string;
   installations: GitHubInstallation[];
+  reviewRevision?: number;
+  reviewSettings?: ReviewSettings;
+  repositoryRules?: Record<string, EffectiveRepositoryRule>;
+  notificationSettings?: {
+    autoNotifyMaintainers: boolean;
+    revision: number;
+  };
+  subscriptions?: GitHubSubscription[];
 }

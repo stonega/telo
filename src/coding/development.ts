@@ -219,13 +219,13 @@ export const developmentRun = z.preprocess(
           (input) =>
             !developmentInput.shape.actor.safeParse(input.actor).success,
         ) &&
-        !(run.mode === "analysis" && run.review?.action === "review")
+        run.mode === "intake"
       )
         ctx.addIssue({
           code: "custom",
           path: ["inputs"],
           message:
-            "Operator-owned inputs are only valid for read-only PR reviews",
+            "Operator-owned inputs are only valid for automated analysis or repository rule tasks",
         });
     }),
 );

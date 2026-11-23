@@ -12,9 +12,33 @@ import type { GitHubApps } from "../github/registry.ts";
 import { ModelProviders } from "../models/service.ts";
 import { decrypt, fingerprint } from "../setup/credentials.ts";
 import { compileCodingSkillsBriefing } from "../skills/coding-briefing.ts";
-import { type ReviewTask, reviewTerminal } from "./config.ts";
+import {
+  effectiveRepositoryAutomationRule,
+  type ReviewTask,
+  reviewTerminal,
+} from "./config.ts";
 import { progressMarker, ReviewGitHub, reviewMarker } from "./github.ts";
 import { checkReview, reviewDestination } from "./policy.ts";
+
+const cleanActionMarkers = (text: string) =>
+  text.replace(/\[ACTION:(?:CLOSE|FIX)\]/gi, "").trim();
+const hasCloseDecision = (result?: ReviewTask["result"]) =>
+  !!result &&
+  (["CLOSE_PR", "CLOSE_ISSUE", "CLOSE"].includes(
+    result.title.trim().toUpperCase(),
+  ) ||
+    /\[ACTION:CLOSE\]/i.test(result.summary));
+const hasFixDecision = (
+  result: ReviewTask["result"],
+  hasCustomInstructions: boolean,
+) =>
+  !!result &&
+  !hasCloseDecision(result) &&
+  (result.publishRequested ||
+    result.intent === "implement" ||
+    result.title.trim().toUpperCase() === "AUTO_FIX" ||
+    /\[ACTION:FIX\]/i.test(result.summary) ||
+    !hasCustomInstructions);
 
 const reason = (error: unknown) =>
   error instanceof Fault ? error.code : "review_failed";
@@ -37,8 +61,11 @@ export class ReviewExecutor {
         (!reviewTerminal(task.state) ||
           (task.state === "unknown" &&
             task.publicationReserved &&
-            task.mode === "review" &&
-            !task.reviewId)) &&
+            ((task.mode === "review" && !task.reviewId) ||
+              (task.targetKind === "issue" &&
+                task.mode === "answer" &&
+                task.automatic &&
+                !task.commentId)))) &&
         Date.parse(task.nextPollAt ?? "1970-01-01") <= Date.now()
       )
         await this.advance(workspaceId, task.id);
@@ -155,8 +182,11 @@ export class ReviewExecutor {
           !(
             t.state === "unknown" &&
             t.publicationReserved &&
-            t.mode === "review" &&
-            !t.reviewId
+            ((t.mode === "review" && !t.reviewId) ||
+              (t.targetKind === "issue" &&
+                t.mode === "answer" &&
+                t.automatic &&
+                !t.commentId))
           )) ||
         Date.parse(t.leaseUntil ?? "1970-01-01") > Date.now()
       )
@@ -167,13 +197,15 @@ export class ReviewExecutor {
         w.reviewTasks?.some(
           (other) =>
             other.id !== t.id &&
+            (other.targetKind ?? "pull_request") ===
+              (t.targetKind ?? "pull_request") &&
             other.number === t.number &&
             other.payload.repositoryId === t.payload.repositoryId &&
             busy(other),
         )
       )
         return;
-      if (t.state === "queued" && !t.statusOnly) {
+      if (t.state === "queued" && !t.statusOnly && t.targetKind !== "issue") {
         const development = await sql.query(
           "SELECT 1 FROM coding_tasks WHERE workspace_id=$1 AND data->'payload'->>'repositoryId'=$2 AND data->'pr'->>'number'=$3 AND data->>'state' IN ('queued','working','publishing','auth_required') LIMIT 1",
           [w.id, String(t.payload.repositoryId), String(t.number)],
@@ -256,15 +288,18 @@ export class ReviewExecutor {
             .filter(
               (other) =>
                 !other.statusOnly &&
+                (other.targetKind ?? "pull_request") ===
+                  (t.targetKind ?? "pull_request") &&
                 other.number === t.number &&
                 other.payload.repositoryId === t.payload.repositoryId,
             );
           const current =
             candidates.find((other) => !reviewTerminal(other.state)) ??
             candidates[0];
+          const label = t.targetKind === "issue" ? "issue" : "PR";
           const summary = current
-            ? `The ${current.mode} task is ${current.cancelRequested ? "stopping" : current.state.replaceAll("_", " ")}.${current.result?.question ? `\n${current.result.question}` : ""}${current.publishedSha ? `\nPublished commit: ${current.publishedSha}` : ""}`
-            : "There is no recorded Review Bot task for this PR.";
+            ? `The ${current.mode} task is ${current.cancelRequested ? "stopping" : current.state.replaceAll("_", " ")}.${current.result?.question ? `\n${current.result.question}` : ""}${current.publishedSha ? `\nPublished commit: ${current.publishedSha}` : ""}${current.prUrl ? `\nPull request: ${current.prUrl}` : ""}`
+            : `There is no recorded Review Bot task for this ${label}.`;
           t.result = {
             status: "analysis",
             intent: "analyze",
@@ -273,7 +308,7 @@ export class ReviewExecutor {
             publishRequested: false,
             summary,
             question: null,
-            title: "PR task status",
+            title: `${label} task status`,
             body: "",
             verificationCommands: [],
           };
@@ -281,11 +316,80 @@ export class ReviewExecutor {
         });
         return;
       }
+      if (task.mode === "close") {
+        const github = await this.github(workspaceId, task, true);
+        await this.sources(task, github);
+        if (task.targetKind === "issue") {
+          const issue = await github.issue(task.number);
+          requireThat(issue.state === "open", "coding_issue_closed", 409);
+          if (!(await this.reserve(workspaceId, task, lease, "publishing")))
+            return;
+          await github.closeIssue(task.number);
+        } else {
+          const pull = await github.pull(task.number);
+          requireThat(
+            pull.state === "open" && !pull.merged,
+            "coding_pr_closed",
+            409,
+          );
+          if (!(await this.reserve(workspaceId, task, lease, "publishing")))
+            return;
+          await github.closePull(task.number);
+        }
+        const reasonText = task.inputs.at(-1)?.text ?? "";
+        const cleanReason = reasonText
+          .replace(
+            /^(?:(?:please|can you|could you|would you)\s+)?close\b[:\s-]*/i,
+            "",
+          )
+          .trim();
+        await this.update(workspaceId, id, lease, (t) => {
+          t.closedItem = true;
+          t.result = {
+            status: "analysis",
+            intent: "analyze",
+            evidenceRevision: t.revision,
+            evidence: reasonText || "close",
+            publishRequested: false,
+            summary: cleanReason
+              ? `Closed this ${t.targetKind === "issue" ? "issue" : "pull request"}: ${cleanReason}`
+              : `Closed this ${t.targetKind === "issue" ? "issue" : "pull request"} as requested.`,
+            question: null,
+            title: "Closed",
+            body: "",
+            verificationCommands: [],
+          };
+          t.state = "completed";
+          t.error = undefined;
+        });
+        return;
+      }
       if (
         task.state === "unknown" ||
-        (task.state === "publishing" && task.mode === "review")
+        (task.state === "publishing" &&
+          (task.mode === "review" ||
+            (task.targetKind === "issue" &&
+              task.mode === "answer" &&
+              task.automatic)))
       ) {
         const github = await this.github(workspaceId, task);
+        if (
+          task.targetKind === "issue" &&
+          task.mode === "answer" &&
+          task.automatic
+        ) {
+          const commentId = await github.find(
+            task.number,
+            "progress",
+            reviewMarker(task),
+          );
+          await this.update(workspaceId, id, lease, (t) => {
+            t.state = commentId ? "completed" : "unknown";
+            t.commentId = commentId;
+            t.error = commentId ? undefined : "review_publication_unknown";
+          });
+          return;
+        }
         const reviewId = await github.find(
           task.number,
           "review",
@@ -383,89 +487,146 @@ export class ReviewExecutor {
       }
     }
     const github = await this.github(workspaceId, task);
-    const pull = await github.pull(task.number);
-    requireThat(
-      pull.state === "open" && !pull.merged && (!task.automatic || !pull.draft),
-      "coding_pr_closed",
-      409,
-    );
-    if (task.automatic && task.headSha !== pull.head.sha) {
-      await this.update(workspaceId, task.id, lease, (t) => {
-        t.state = "cancelled";
-        t.error = "review_head_changed";
-      });
-      return;
-    }
-    if (task.mode === "fix")
-      requireThat(
-        pull.head.repo?.full_name === task.payload.repository,
-        "coding_pr_target_changed",
-        409,
-      );
     const sources = await this.sources(task, github);
     const w = await this.guard(workspaceId, task);
-    const previousReview = [...(w.reviewTasks ?? [])]
-      .reverse()
-      .find(
-        (t) =>
-          t.id !== task.id &&
-          t.number === task.number &&
-          t.payload.repositoryId === task.payload.repositoryId &&
-          t.mode === "review" &&
-          t.result,
-      );
-    if (task.run?.review && task.run.review.headSha !== pull.head.sha) {
-      await this.update(workspaceId, task.id, lease, (t) => {
-        t.state = "queued";
-        t.run = undefined;
-        t.attemptIds ??= [];
-        t.attemptIds.push(t.attemptId);
-        t.attemptId = randomUUID();
-        t.previousAttemptId = undefined;
-      });
-      return;
-    }
+    const rule = effectiveRepositoryAutomationRule(
+      w,
+      task.payload.repositoryId,
+    );
     const reviewWorkspace = await this.store.read(workspaceId);
     const reviewSkillsBriefing = compileCodingSkillsBriefing(
       reviewWorkspace,
       task.payload.repositoryId,
       { maxBytes: 8000 },
     );
-    const run =
-      task.run ??
-      developmentRun.parse({
-        taskId: task.id,
-        revision: task.revision,
-        mode: task.mode === "fix" ? "work" : "analysis",
-        inputs: task.inputs,
-        ...(reviewSkillsBriefing?.text
-          ? { memory: reviewSkillsBriefing.text }
-          : {}),
-        context: `PR title: ${pull.title.slice(0, 200)}\nDescription: ${(pull.body ?? "").slice(0, 8000)}\nAddressed comments (reference): ${sources}\nPrevious review (reference, may describe an older commit): ${JSON.stringify(previousReview?.result ?? null).slice(0, 8000)}\nPrevious task result: ${JSON.stringify(task.result ?? null).slice(0, 6000)}`,
-        previousAttemptId: task.previousAttemptId,
-        review: {
-          number: task.number,
-          headSha: pull.head.sha,
-          baseSha: pull.base.sha,
-          action: task.mode,
-        },
-        pr:
-          task.mode === "fix"
-            ? {
-                number: task.number,
-                url: `https://github.com/${task.payload.repository}/pull/${task.number}`,
-                branch: branchName.parse(pull.head.ref),
-                headSha: pull.head.sha,
-              }
-            : undefined,
-      });
+    let run: ReviewTask["run"];
+    let resolvedBaseBranch = task.payload.baseBranch;
+    if (task.targetKind === "issue") {
+      const issue = await github.issue(task.number);
+      requireThat(issue.state === "open", "coding_issue_closed", 409);
+      const labels = (issue.labels ?? [])
+        .map((l) => (typeof l === "string" ? l : l.name))
+        .join(", ");
+      const ruleNotes = [
+        rule.issueInstructions
+          ? `Repository issue rules (apply within granted capabilities): ${rule.issueInstructions}`
+          : "",
+        task.mode === "answer" && task.autoFixFollowup && rule.issueAutoFix
+          ? "Automatic issue fix is ENABLED for this repository. After analyzing the issue and writing your reply in summary, set publishRequested=true (or title='AUTO_FIX') if a code fix and pull request should be created according to the repository rules; set publishRequested=false if this issue only needs an answer or clarification."
+          : "",
+        task.mode === "answer" && rule.issueAllowAutoClose
+          ? "Automatic issue close is ENABLED for this repository. If the repository issue rules state that this issue should be closed, set title='CLOSE_ISSUE' (or include [ACTION:CLOSE] in summary) and explain why in summary."
+          : "",
+        task.mode === "fix"
+          ? `Implement the fix for Issue #${task.number}, verify with repository checks, and prepare a PR title and body that includes 'Fixes #${task.number}'.`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+      run =
+        task.run ??
+        developmentRun.parse({
+          taskId: task.id,
+          revision: task.revision,
+          mode: task.mode === "fix" ? "work" : "analysis",
+          inputs: task.inputs,
+          ...(reviewSkillsBriefing?.text
+            ? { memory: reviewSkillsBriefing.text }
+            : {}),
+          context: `Issue #${task.number} title: ${issue.title.slice(0, 200)}\nAuthor: ${issue.user?.login ?? "unknown"}\nLabels: ${labels || "none"}\nDescription: ${(issue.body ?? "").slice(0, 8000)}\nAddressed comments (reference): ${sources}\n${ruleNotes ? `${ruleNotes}\n` : ""}Previous task result: ${JSON.stringify(task.result ?? null).slice(0, 6000)}`,
+          previousAttemptId: task.previousAttemptId,
+        });
+    } else {
+      const pull = await github.pull(task.number);
+      requireThat(
+        pull.state === "open" &&
+          !pull.merged &&
+          (!task.automatic || !pull.draft),
+        "coding_pr_closed",
+        409,
+      );
+      if (task.automatic && task.headSha !== pull.head.sha) {
+        await this.update(workspaceId, task.id, lease, (t) => {
+          t.state = "cancelled";
+          t.error = "review_head_changed";
+        });
+        return;
+      }
+      if (task.mode === "fix")
+        requireThat(
+          pull.head.repo?.full_name === task.payload.repository,
+          "coding_pr_target_changed",
+          409,
+        );
+      const previousReview = [...(w.reviewTasks ?? [])]
+        .reverse()
+        .find(
+          (t) =>
+            t.id !== task.id &&
+            (t.targetKind ?? "pull_request") === "pull_request" &&
+            t.number === task.number &&
+            t.payload.repositoryId === task.payload.repositoryId &&
+            t.mode === "review" &&
+            t.result,
+        );
+      if (task.run?.review && task.run.review.headSha !== pull.head.sha) {
+        await this.update(workspaceId, task.id, lease, (t) => {
+          t.state = "queued";
+          t.run = undefined;
+          t.attemptIds ??= [];
+          t.attemptIds.push(t.attemptId);
+          t.attemptId = randomUUID();
+          t.previousAttemptId = undefined;
+        });
+        return;
+      }
+      const prRuleNotes = [
+        rule.prInstructions
+          ? `Repository PR rules (apply within granted capabilities): ${rule.prInstructions}`
+          : "",
+        task.mode === "review" && rule.allowAutoClose
+          ? "Automatic PR closing is ENABLED for this repository. If the PR violates the repository PR rules in a way that requires closing the PR, set title='CLOSE_PR' (or include [ACTION:CLOSE] in summary) and explain the reason clearly in summary."
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+      resolvedBaseBranch = branchName.parse(pull.base.ref);
+      run =
+        task.run ??
+        developmentRun.parse({
+          taskId: task.id,
+          revision: task.revision,
+          mode: task.mode === "fix" ? "work" : "analysis",
+          inputs: task.inputs,
+          ...(reviewSkillsBriefing?.text
+            ? { memory: reviewSkillsBriefing.text }
+            : {}),
+          context: `PR title: ${pull.title.slice(0, 200)}\nDescription: ${(pull.body ?? "").slice(0, 8000)}\nAddressed comments (reference): ${sources}\n${prRuleNotes ? `${prRuleNotes}\n` : ""}Previous review (reference, may describe an older commit): ${JSON.stringify(previousReview?.result ?? null).slice(0, 8000)}\nPrevious task result: ${JSON.stringify(task.result ?? null).slice(0, 6000)}`,
+          previousAttemptId: task.previousAttemptId,
+          review: {
+            number: task.number,
+            headSha: pull.head.sha,
+            baseSha: pull.base.sha,
+            action: task.mode === "close" ? "review" : task.mode,
+          },
+          pr:
+            task.mode === "fix"
+              ? {
+                  number: task.number,
+                  url: `https://github.com/${task.payload.repository}/pull/${task.number}`,
+                  branch: branchName.parse(pull.head.ref),
+                  headSha: pull.head.sha,
+                }
+              : undefined,
+        });
+    }
     // Persist the entire stable-ID start payload before dispatch. Replays stay identical.
     const saved = await this.update(workspaceId, task.id, lease, (t) => {
       t.run = run;
-      t.headSha = run.review?.headSha;
-      t.baseSha = run.review?.baseSha;
-      t.payload.baseBranch = branchName.parse(pull.base.ref);
-      t.consumedRevision = run.revision;
+      t.headSha = run?.review?.headSha;
+      t.baseSha = run?.review?.baseSha;
+      t.payload.baseBranch = resolvedBaseBranch;
+      t.consumedRevision = run?.revision ?? t.revision;
     });
     if (!saved || !(await this.reserve(workspaceId, saved, lease, "starting")))
       return;
@@ -589,8 +750,14 @@ export class ReviewExecutor {
           task.mode === "fix" &&
           task.state === "publishing"
         ) {
+          const validPrUrl =
+            task.targetKind === "issue"
+              ? status.prUrl?.startsWith(
+                  `https://github.com/${task.payload.repository}/pull/`,
+                )
+              : status.prUrl === task.run?.pr?.url;
           requireThat(
-            status.prUrl === task.run?.pr?.url && status.publishedSha,
+            validPrUrl && status.publishedSha,
             "coding_publication_unknown",
             409,
           );
@@ -617,6 +784,78 @@ export class ReviewExecutor {
   private async publish(workspaceId: string, task: ReviewTask, lease: string) {
     const github = await this.github(workspaceId, task, true);
     await this.sources(task, github);
+    const w = await this.guard(workspaceId, task);
+    const rule = effectiveRepositoryAutomationRule(
+      w,
+      task.payload.repositoryId,
+    );
+    if (task.targetKind === "issue") {
+      const issue = await github.issue(task.number);
+      requireThat(issue.state === "open", "coding_issue_closed", 409);
+      if (task.mode === "fix") {
+        const app = await this.apps.get(w.operatorId);
+        requireThat(app, "github_app_not_configured", 409);
+        const token = await app.installationToken(
+          task.payload.installationId,
+          [task.payload.repositoryId],
+          "publish",
+        );
+        if (!(await this.reserve(workspaceId, task, lease, "publishing")))
+          return;
+        await this.runner?.publish(workspaceId, task.attemptId, token.token);
+        return;
+      }
+      const shouldClose =
+        rule.issueAllowAutoClose && hasCloseDecision(task.result);
+      const shouldAutoFix =
+        !shouldClose &&
+        Boolean(
+          task.autoFixFollowup &&
+            rule.issueAutoFix &&
+            hasFixDecision(task.result, Boolean(rule.issueInstructions)),
+        );
+      const cleanedSummary = cleanActionMarkers(
+        task.result?.summary ?? "Issue analysis completed.",
+      );
+      if (task.automatic) {
+        if (!(await this.reserve(workspaceId, task, lease, "publishing")))
+          return;
+        const reply = await github.publishIssueReply(task, cleanedSummary);
+        if (shouldClose) await github.closeIssue(task.number);
+        await this.update(
+          workspaceId,
+          task.id,
+          lease,
+          (t, currentWorkspace) => {
+            t.commentId = reply.id;
+            if (t.result) t.result.summary = cleanedSummary;
+            if (shouldClose) t.closedItem = true;
+            t.state = "completed";
+            t.error = undefined;
+            if (shouldAutoFix) {
+              this.queueIssueAutoFix(
+                currentWorkspace,
+                t,
+                rule.issueInstructions,
+              );
+            }
+          },
+        );
+        return;
+      }
+      if (shouldClose) {
+        if (!(await this.reserve(workspaceId, task, lease, "publishing")))
+          return;
+        await github.closeIssue(task.number);
+      }
+      await this.update(workspaceId, task.id, lease, (t) => {
+        if (t.result) t.result.summary = cleanedSummary;
+        if (shouldClose) t.closedItem = true;
+        t.state = "completed";
+        t.error = undefined;
+      });
+      return;
+    }
     const pull = await github.pull(task.number);
     requireThat(
       pull.state === "open" && !pull.merged && (!task.automatic || !pull.draft),
@@ -646,7 +885,6 @@ export class ReviewExecutor {
         "coding_pr_target_changed",
         409,
       );
-      const w = await this.guard(workspaceId, task);
       const app = await this.apps.get(w.operatorId);
       requireThat(app, "github_app_not_configured", 409);
       const token = await app.installationToken(
@@ -657,7 +895,18 @@ export class ReviewExecutor {
       if (!(await this.reserve(workspaceId, task, lease, "publishing"))) return;
       await this.runner?.publish(workspaceId, task.attemptId, token.token);
     } else if (task.mode === "review") {
-      const payload = await github.review(task);
+      const shouldClose = rule.allowAutoClose && hasCloseDecision(task.result);
+      const cleanedTask: ReviewTask =
+        task.result && /\[ACTION:CLOSE\]/i.test(task.result.summary)
+          ? {
+              ...task,
+              result: {
+                ...task.result,
+                summary: cleanActionMarkers(task.result.summary),
+              },
+            }
+          : task;
+      const payload = await github.review(cleanedTask);
       // File reads may race a force-push. Recheck immediately before the reservation.
       requireThat(
         (await github.pull(task.number)).head.sha === task.headSha,
@@ -665,9 +914,12 @@ export class ReviewExecutor {
         409,
       );
       if (!(await this.reserve(workspaceId, task, lease, "publishing"))) return;
-      const review = await github.publishReview(task, payload);
+      const review = await github.publishReview(cleanedTask, payload);
+      if (shouldClose) await github.closePull(task.number);
       await this.update(workspaceId, task.id, lease, (t) => {
+        if (t.result) t.result.summary = cleanActionMarkers(t.result.summary);
         t.reviewId = review.id;
+        if (shouldClose) t.closedItem = true;
         t.state = "completed";
         t.error = undefined;
       });
@@ -676,29 +928,87 @@ export class ReviewExecutor {
         t.state = "completed";
       });
   }
+  private queueIssueAutoFix(
+    w: Workspace,
+    replyTask: ReviewTask,
+    issueInstructions?: string,
+  ) {
+    w.reviewTasks ??= [];
+    const fixKey = `${replyTask.key}:autofix`;
+    if (w.reviewTasks.some((t) => t.key === fixKey)) return;
+    if (
+      w.reviewTasks.length >= 200 ||
+      w.reviewTasks.filter((t) => !reviewTerminal(t.state)).length >= 20
+    )
+      return;
+    const at = new Date().toISOString();
+    const text = issueInstructions
+      ? `Implement the fix for Issue #${replyTask.number} and open a pull request.\n\nInitial analysis:\n${(replyTask.result?.summary ?? "").slice(0, 1500)}\n\nRepository issue rules:\n${issueInstructions}`
+      : `Implement the fix for Issue #${replyTask.number} and open a pull request.\n\nInitial analysis:\n${(replyTask.result?.summary ?? "").slice(0, 2000)}`;
+    const fixTask: ReviewTask = {
+      id: randomUUID(),
+      key: fixKey,
+      actor: replyTask.actor,
+      githubUserId: replyTask.githubUserId,
+      payload: {
+        ...structuredClone(replyTask.payload),
+        title: `Issue #${replyTask.number}`,
+        body: text.slice(0, 2500),
+      },
+      reviewRevision: replyTask.reviewRevision,
+      number: replyTask.number,
+      targetKind: "issue",
+      mode: "fix",
+      automatic: true,
+      inputs: [
+        {
+          revision: 1,
+          actor: replyTask.actor,
+          sourceId: `${replyTask.inputs[0]?.sourceId ?? "github:auto"}:autofix`,
+          text,
+          kind: "request",
+        },
+      ],
+      sources: [],
+      revision: 1,
+      consumedRevision: 0,
+      state: "queued",
+      attemptId: randomUUID(),
+      progress: { state: "pending" },
+      createdAt: at,
+      updatedAt: at,
+    };
+    w.reviewTasks.push(fixTask);
+  }
   private body(task: ReviewTask) {
+    const isIssue = task.targetKind === "issue";
+    const label = isIssue ? "Issue" : "PR";
     const states: Record<ReviewTask["state"], string> = {
       queued: "Your request is queued.",
-      starting: "Preparing the PR checkout…",
+      starting: `Preparing the ${label} checkout…`,
       running:
         task.mode === "fix"
           ? "Working on the requested changes and checks…"
-          : "Reviewing the PR…",
+          : isIssue
+            ? "Analyzing the issue…"
+            : "Reviewing the PR…",
       auth_required: "This task is paused until Codex is reconnected in Telo.",
       waiting: `I need your input: ${task.result?.question ?? "Please clarify the requested change."}\nReply here and mention the bot to continue.`,
       ready:
         task.mode === "fix"
           ? "Checks are complete. Preparing the result…"
-          : "Preparing the review result…",
+          : `Preparing the ${isIssue ? "issue" : "review"} result…`,
       publishing: "Publishing the result…",
-      completed: task.result?.summary ?? "Your request is complete.",
+      completed: cleanActionMarkers(
+        task.result?.summary ?? "Your request is complete.",
+      ),
       failed: `I couldn’t finish this request (${task.error ?? "review_failed"}). Check the task in Telo before retrying.`,
       cancelled: "This task has stopped.",
       unknown: task.publicationReserved
         ? "The publication outcome needs an operator’s check. I will not repeat the write automatically."
         : "The execution outcome needs an operator’s check before this task can continue.",
     };
-    return `**Review Bot** — PR #${task.number}\n\n${states[task.state]}${task.publishedSha ? `\n\nCommit: [${task.publishedSha.slice(0, 7)}](https://github.com/${task.payload.repository}/commit/${task.publishedSha})` : ""}\n\n${progressMarker(task)}`;
+    return `**Review Bot** — ${label} #${task.number}\n\n${states[task.state]}${task.prUrl && isIssue ? `\n\nPull request: ${task.prUrl}` : ""}${task.publishedSha ? `\n\nCommit: [${task.publishedSha.slice(0, 7)}](https://github.com/${task.payload.repository}/commit/${task.publishedSha})` : ""}\n\n${progressMarker(task)}`;
   }
   private async progress(workspaceId: string, task: ReviewTask, lease: string) {
     if (!task.progress) return;
