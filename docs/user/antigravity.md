@@ -17,8 +17,8 @@ Open **Plugins → Antigravity CLI**, toggle the title switch to enable the plug
 
 ### Google account (OAuth)
 
-1. Choose **Google account (OAuth)** and save configuration if switching methods.
-2. Reopen **Edit** and click **Sign in with Google**.
+1. **Google account (OAuth)** is the default. If switching from a Gemini API key, save the new sign-in method and reopen **Edit**.
+2. Click **Sign in with Google**.
 3. Open the displayed **Google sign-in** link in your browser and complete Google authentication.
 4. Copy the authorization code (or the full callback URL) shown by Google, paste it into **Authorization code or callback URL**, and click **Complete sign-in**.
 

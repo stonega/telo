@@ -151,28 +151,9 @@ const url = process.env.TEST_DATABASE_URL;
     expect(initial.settings.enabled).toBe(false);
     expect(initial.settings.authMode).toBe("google_oauth");
     expect(initial.oauthAuth.state).toBe("disconnected");
+    expect((await store.read(workspaceId)).antigravity).toBeUndefined();
 
-    // Enable with Google OAuth and model/effort.
-    const saveRes = await req(
-      `/api/admin/workspaces/${workspaceId}/plugins/antigravity`,
-      "PUT",
-      {
-        revision: 0,
-        settings: {
-          enabled: true,
-          authMode: "google_oauth",
-          model: "gemini-4-neon-high",
-          effort: "high",
-        },
-      },
-    );
-    expect(saveRes.status).toBe(200);
-    const saved = await saveRes.json();
-    expect(saved.revision).toBe(1);
-    expect(saved.settings.enabled).toBe(true);
-    expect(saved.settings.model).toBe("gemini-4-neon-high");
-
-    // Start Google OAuth.
+    // The default Google OAuth mode works before settings are saved.
     const startRes = await req(
       `/api/admin/workspaces/${workspaceId}/plugins/antigravity/auth/start`,
       "POST",
@@ -193,6 +174,28 @@ const url = process.env.TEST_DATABASE_URL;
     expect(submittedCode).toBe("pasted-oauth-code");
     const completed = await completeRes.json();
     expect(completed.oauthAuth.state).toBe("connected");
+    expect(completed.settings.enabled).toBe(false);
+    expect(completed.revision).toBe(0);
+
+    // Enable with Google OAuth and model/effort.
+    const saveRes = await req(
+      `/api/admin/workspaces/${workspaceId}/plugins/antigravity`,
+      "PUT",
+      {
+        revision: completed.revision,
+        settings: {
+          enabled: true,
+          authMode: "google_oauth",
+          model: "gemini-4-neon-high",
+          effort: "high",
+        },
+      },
+    );
+    expect(saveRes.status).toBe(200);
+    const saved = await saveRes.json();
+    expect(saved.revision).toBe(1);
+    expect(saved.settings.enabled).toBe(true);
+    expect(saved.settings.model).toBe("gemini-4-neon-high");
 
     // Disconnect Google OAuth.
     const logoutRes = await req(
@@ -221,6 +224,16 @@ const url = process.env.TEST_DATABASE_URL;
     expect(apiKeyRes.status).toBe(200);
     const apiKeyPage = await apiKeyRes.json();
     expect(apiKeyPage.apiKeyConfigured).toBe(true);
+    const wrongMode = await req(
+      `/api/admin/workspaces/${workspaceId}/plugins/antigravity/auth/start`,
+      "POST",
+      {},
+    );
+    expect(wrongMode.status).toBe(409);
+    expect(await wrongMode.json()).toEqual({
+      error: "coding_device_mode_required",
+    });
+    expect(agyAuth.state).toBe("disconnected");
   });
 
   test("codingExtension starts Antigravity task automatically when only Antigravity is enabled and executor dispatches it", async () => {

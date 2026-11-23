@@ -55,6 +55,8 @@ function message(error: unknown) {
       "Connect the selected repository in GitHub before saving.",
     coding_device_auth_required:
       "Connect a Google account or configure a Gemini API key before starting Antigravity CLI tasks.",
+    coding_device_mode_required:
+      "Reload the saved settings and make sure Google account (OAuth) is the saved sign-in method before trying again.",
     coding_antigravity_login_unavailable:
       "Google sign-in could not start. Check that Antigravity CLI (agy) is installed on the runner and retry.",
     coding_antigravity_login_network_failed:

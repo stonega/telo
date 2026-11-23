@@ -5,6 +5,22 @@ Historical verification logs are archived by month to keep this active status le
 - [October 2026 archive](archive/implementation-status-2026-10.md) (125 entries)
 - [September 2026 baseline archive](archive/implementation-status-2026-09.md) (32 entries)
 
+## Antigravity Google sign-in with default settings (2026-11-23)
+
+The admin endpoint now rechecks the same effective sign-in method after the runner
+starts OAuth. Workspaces without saved Antigravity settings keep the default
+Google OAuth session, and a workspace that switches to a Gemini API key still
+rejects Google sign-in. The modal explains a saved-mode conflict and keeps the
+draft available for retry.
+
+The PostgreSQL integration test reproduced HTTP 409 on `ad91478` and now covers
+starting and completing OAuth before saving settings. The browser selection ran
+20 Antigravity, coding runtime and plugin catalog scenarios against the locally
+and VPS-verified `ad91478` baseline. Desktop and mobile checks cover the saved
+summary, editor, sign-in progress, mode-conflict message and retry. No shared
+routes, fixtures or dependencies changed. Live Google account authorization
+remains outside this verification.
+
 ## Antigravity CLI Google sign-in startup (2026-11-23)
 
 The container runner images now include checksum-pinned `agy` 1.5.15 for Google

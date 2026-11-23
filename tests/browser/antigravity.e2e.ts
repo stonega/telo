@@ -13,7 +13,7 @@ const pendingOAuth = {
 
 async function fixture(page: Page, state: AntigravityPage["oauthAuth"]) {
   const data: AntigravityPage = {
-    revision: 1,
+    revision: 0,
     settings: {
       enabled: false,
       authMode: "google_oauth",
@@ -163,6 +163,54 @@ test("Google OAuth sign-in displays link, accepts pasted authorization code, and
     fullPage: true,
   });
 });
+
+for (const width of [1280, 390]) {
+  test(`Google sign-in explains a saved mode conflict and can be retried at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 844 });
+    const { data } = await fixture(page, { state: "disconnected" });
+    const edit = page.getByRole("button", {
+      name: "Edit Antigravity CLI configuration",
+    });
+    await edit.click();
+    const dialog = page.getByRole("dialog", {
+      name: "Edit Antigravity CLI configuration",
+    });
+    await dialog.getByLabel("Model (optional)").fill("gemini-4-neon-high");
+    await page.route(
+      `**${endpoint}/auth/start`,
+      (route) =>
+        route.fulfill({
+          status: 409,
+          json: { error: "coding_device_mode_required" },
+        }),
+      { times: 1 },
+    );
+    const signIn = dialog.getByRole("button", { name: "Sign in with Google" });
+    await signIn.click();
+    await expect(dialog.getByRole("alert")).toContainText(
+      "Reload the saved settings and make sure Google account (OAuth) is the saved sign-in method",
+    );
+    await expect(dialog.getByLabel("Model (optional)")).toHaveValue(
+      "gemini-4-neon-high",
+    );
+    await expect(page.locator("body")).toHaveJSProperty("scrollWidth", width);
+    await page.screenshot({
+      path: `test-results/antigravity-oauth-mode-error-${width}.png`,
+    });
+
+    await page.route(`**${endpoint}/auth/start`, async (route) => {
+      data.oauthAuth = pendingOAuth;
+      await route.fulfill({ json: pendingOAuth });
+    });
+    await signIn.click();
+    await expect(dialog.getByRole("alert")).toHaveCount(0);
+    await expect(
+      dialog.getByRole("link", { name: "Google sign-in" }),
+    ).toHaveAttribute("href", pendingOAuth.verificationUrl);
+  });
+}
 
 test("Gemini API key configuration saves model, effort, and write-only key and preserves draft on runner recheck", async ({
   page,

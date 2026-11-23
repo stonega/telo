@@ -174,10 +174,8 @@ export function pluginRoutes(deps: AdminRouteDeps) {
     "/api/admin/workspaces/:id/plugins/antigravity/auth/start",
     async (c) => {
       const id = validId(c.req.param("id"));
-      const page = antigravityView(
-        await store.read(id),
-        c.get("session").admin,
-      );
+      const admin = c.get("session").admin;
+      const page = antigravityView(await store.read(id), admin);
       requireThat(
         page.settings.authMode === "google_oauth",
         "coding_device_mode_required",
@@ -192,7 +190,8 @@ export function pluginRoutes(deps: AdminRouteDeps) {
       const current = await store.read(id);
       if (
         current.deletion ||
-        current.antigravity?.settings.authMode !== "google_oauth"
+        current.operatorId !== admin.id ||
+        antigravityView(current, admin).settings.authMode !== "google_oauth"
       ) {
         await deviceAuth.antigravityLogout(id);
         requireThat(false, "coding_device_mode_required", 409);
