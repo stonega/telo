@@ -53,7 +53,7 @@ services:
       OPENSANDBOX_URL: ${OPENSANDBOX_URL:-}
       OPENSANDBOX_API_KEY: ${OPENSANDBOX_API_KEY:-}
       OPENSANDBOX_SECURE_ACCESS: ${OPENSANDBOX_SECURE_ACCESS:-false}
-      OPENSANDBOX_ALLOWED_DOMAINS: ${OPENSANDBOX_ALLOWED_DOMAINS:-github.com,api.github.com,*.githubusercontent.com,registry.npmjs.org,*.npmjs.org,deb.debian.org,security.debian.org,auth.openai.com,api.openai.com,chatgpt.com,*.openai.com,*.chatgpt.com}
+      OPENSANDBOX_ALLOWED_DOMAINS: ${OPENSANDBOX_ALLOWED_DOMAINS:-github.com,api.github.com,*.githubusercontent.com,registry.npmjs.org,*.npmjs.org,deb.debian.org,security.debian.org,auth.openai.com,api.openai.com,chatgpt.com,*.openai.com,*.chatgpt.com,accounts.google.com,oauth2.googleapis.com,generativelanguage.googleapis.com,*.googleapis.com,antigravity.google}
       CODEX_RUNNER_CPUS: ${CODEX_RUNNER_CPUS:-2}
       CODEX_RUNNER_MEMORY_MB: ${CODEX_RUNNER_MEMORY_MB:-4096}
       CODEX_RUNNER_RETENTION_HOURS: ${CODEX_RUNNER_RETENTION_HOURS:-24}

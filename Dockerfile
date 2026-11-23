@@ -53,6 +53,26 @@ FROM docker:29-cli@sha256:b1805116a6a86cc591b5d5f60a910a0715cdcc9d18d866ad68b145
 FROM ghcr.io/jdx/mise:2026.10.4 AS mise-bin
 FROM ghcr.io/astral-sh/uv:0.8.3 AS uv-bin
 
+# Pinned Antigravity CLI (agy) binary shared by the runner supervisor and task containers.
+FROM runtime-base AS agy-bin
+ARG AGY_RELEASE=1.5.15-5514532022517760
+ARG AGY_ARCHIVE_BASE_URL=https://storage.googleapis.com/antigravity-public/antigravity-cli
+ARG AGY_SHA512_AMD64=af3f0be58b8475940d79f9abea19e762ecc3d265ea9f56cff8dd805e27ba299b44a305a79504a7ffe6ebdfa29a294c56edc4caed1875990bfaf2fef1508ec8b0
+ARG AGY_SHA512_ARM64=d64ad759781b50dfacfa7d9826c0ad469959d01bdf5a170acd4c83472eba31c677baf0052ac8ab48eef40f0d3f0e26057e752aabd24331c79f4c881d4b872125
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && case "$(uname -m)" in \
+         x86_64|amd64) agy_path="linux-x64/cli_linux_x64.tar.gz"; agy_sha512="${AGY_SHA512_AMD64}" ;; \
+         aarch64|arm64) agy_path="linux-arm/cli_linux_arm64.tar.gz"; agy_sha512="${AGY_SHA512_ARM64}" ;; \
+         *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;; \
+       esac \
+    && curl -fsSL --connect-timeout 30 --max-time 300 --retry 3 "${AGY_ARCHIVE_BASE_URL}/${AGY_RELEASE}/${agy_path}" -o /tmp/agy.tar.gz \
+    && printf '%s  /tmp/agy.tar.gz\n' "${agy_sha512}" | sha512sum -c - \
+    && tar -xzf /tmp/agy.tar.gz -C /tmp antigravity \
+    && install -m 0755 /tmp/antigravity /usr/local/bin/agy \
+    && rm -f /tmp/agy.tar.gz /tmp/antigravity \
+    && /usr/local/bin/agy --version
+
 # Install supervisor tools before application files so code changes reuse this layer.
 FROM runtime-base AS codex-supervisor-dependencies
 COPY --from=docker-client /usr/local/bin/docker /usr/local/bin/docker
@@ -61,6 +81,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && npm install -g @openai/codex@0.155.1 \
     && npm cache clean --force \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=agy-bin /usr/local/bin/agy /usr/local/bin/agy
 # Trusted supervisor: only this service receives the selected engine socket.
 FROM codex-supervisor-dependencies AS codex-supervisor
 COPY --from=runtime --chown=node:node /app /app
@@ -77,6 +98,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g @openai/codex@${CODEX_VERSION} @alibaba-group/open-code-review@${OPEN_CODE_REVIEW_VERSION} \
     && npm cache clean --force
+COPY --from=agy-bin /usr/local/bin/agy /usr/local/bin/agy
 COPY --from=base /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=mise-bin /usr/local/bin/mise /usr/local/bin/mise
 COPY --from=uv-bin /uv /uvx /usr/local/bin/

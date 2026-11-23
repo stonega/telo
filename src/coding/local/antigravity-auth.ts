@@ -1,5 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { accessSync, constants, statSync } from "node:fs";
 import {
   lstat,
   mkdir,
@@ -9,12 +10,49 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { dirname, join, relative, sep } from "node:path";
+import { delimiter, dirname, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import { Fault, requireThat } from "../../domain.ts";
 import { decrypt, encrypt, hash } from "../../setup/credentials.ts";
 import type { AntigravityAuthStatus } from "./protocol.ts";
 import type { RunnerSettings } from "./settings.ts";
+
+function isExecutableFile(candidate: string): boolean {
+  try {
+    accessSync(candidate, constants.X_OK);
+    return statSync(candidate).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolves `agy` before launching it with a task or login HOME.
+ */
+export function resolveAntigravityBinary(
+  configured?: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const trimmed = configured?.trim();
+  if (trimmed && trimmed !== "agy") return trimmed;
+  const pathDirs = (env.PATH ?? "")
+    .split(delimiter)
+    .map((dir) => dir.trim())
+    .filter(Boolean);
+  for (const dir of pathDirs) {
+    const candidate = resolve(dir, "agy");
+    if (isExecutableFile(candidate)) return candidate;
+  }
+  const fallbacks = [
+    ...(env.HOME ? [resolve(env.HOME, ".local", "bin", "agy")] : []),
+    "/usr/local/bin/agy",
+    "/usr/bin/agy",
+  ];
+  for (const candidate of fallbacks) {
+    if (isExecutableFile(candidate)) return candidate;
+  }
+  return trimmed || "agy";
+}
 
 interface PendingAntigravityLogin {
   child: ChildProcessWithoutNullStreams;
@@ -63,6 +101,10 @@ const IGNORED_BASENAMES = new Set([
   "conversation_summaries.db",
   "conversation_summaries.db-shm",
   "conversation_summaries.db-wal",
+  "jetbox_summaries_proto.pb",
+  "agyhub_summaries_proto.pb",
+  "conversation_metadata.json",
+  "last_conversations.json",
   "history.jsonl",
   "cli.log",
   "last_check.timestamp",
@@ -354,11 +396,12 @@ export class AntigravityAuth {
     await mkdir(loginHome, { recursive: true, mode: 0o700 });
     this.failed.delete(workspaceId);
 
-    const binary =
+    const binary = resolveAntigravityBinary(
       this.binary ??
-      (this.settings.CODEX_CONTAINER_ENGINE === "native"
-        ? this.settings.CODEX_NATIVE_AGY_BIN
-        : "agy");
+        (this.settings.CODEX_CONTAINER_ENGINE === "native"
+          ? this.settings.CODEX_NATIVE_AGY_BIN
+          : undefined),
+    );
 
     const child = spawn(binary, ["acp", "--login"], {
       env: {

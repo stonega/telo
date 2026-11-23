@@ -8,8 +8,8 @@ Ordinary chat does not imply Antigravity CLI is ready. Operators must configure 
 
 Antigravity CLI shares the deployment's coding runner (`Docker`, `OpenSandbox`, or `Native VPS` in **Plugins → Antigravity CLI → Runtime**).
 
-- **Native VPS**: Install `agy` on the host and ensure it is on `PATH` (or set `CODEX_NATIVE_AGY_BIN` to the absolute executable path).
-- **Docker / OpenSandbox**: Ensure the `agy` binary is present in the coding job image and supervisor image (or mount/install it on the host for native mode).
+- With **Docker or OpenSandbox**, the built-in `codex-supervisor`, `codex-job`, and `codex-opensandbox-job` images bundle a pinned `agy` binary at `/usr/local/bin/agy`. Rebuild or update the runner images after upgrading.
+- On a **Native VPS**, install `agy` where the runner service user can execute it. Telo checks the service's `PATH`, its home directory under `.local/bin`, and the system directories `/usr/local/bin` and `/usr/bin`. For a custom location, set `CODEX_NATIVE_AGY_BIN` to its absolute path in the runner's environment.
 
 ## Operator: authenticate in the Admin Panel
 

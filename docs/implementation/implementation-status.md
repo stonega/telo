@@ -5,6 +5,38 @@ Historical verification logs are archived by month to keep this active status le
 - [October 2026 archive](archive/implementation-status-2026-10.md) (125 entries)
 - [September 2026 baseline archive](archive/implementation-status-2026-09.md) (32 entries)
 
+## Antigravity CLI Google sign-in startup (2026-11-23)
+
+The container runner images now include checksum-pinned `agy` 1.5.15 for Google
+sign-in and coding tasks. Native runners resolve the executable before setting
+the isolated login or task home, so a service-user installation under `.local/bin`
+works with the shipped systemd `PATH`. The auth regression checks recovery after
+the executable becomes available, and the container smoke checks the bundled CLI
+in the task image and Google sign-in startup through the supervisor endpoint.
+
+The full Bun suite passed 1,858 tests with 9 Docker-gated skips. The exact app
+image passed the integration startup contract with zero external startup calls.
+The rebuilt Linux x64 supervisor returned a Google sign-in link with networking
+disabled, and both task images ran `agy` as the task user. The builds used a
+local mirror of the checksum-verified Google archive after direct downloads
+stalled. Both pinned archive checksums were verified. The native runner also
+returned a Google sign-in link with the systemd service's `PATH`. The Docker
+and native Compose overlays passed configuration validation.
+
+The unmodified `8535864` supervisor reproduced the sign-in startup error. The
+broader runner smoke passed its Antigravity checks and then failed at parallel
+Codex task setup. The same Codex failure reproduced on the unmodified baseline.
+
+Browser selection compared the Telo rename's verified baseline (`9df3aaa`) with
+`8535864` plus this working-tree fix. All 55 selected tests passed. Antigravity
+covered the sign-in link, code completion and alternate sign-in method. The coding
+runtime, coding environments, coding stop, plugin catalog and GitHub repository
+sync suites covered shared controls and dependent screens. The sidebar and update
+suites covered navigation, themes and update entry points changed since the
+baseline. No earlier passing tests were carried forward as evidence for this fix.
+Live Google account authorization and workflows outside this browser selection
+remain unverified.
+
 ## Explicit reference repositories and multi-turn context resolution for coding tasks (2026-11-22)
 
 Fixed reference-repository attachment for multi-turn coding requests and repository-name typos with zero new runtime dependencies or database migrations:

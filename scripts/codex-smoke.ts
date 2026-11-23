@@ -60,6 +60,17 @@ const developmentKeys = developmentIds.map((id) => taskKey(workspaceId, id));
 const phases = ["prepare", "setup", "implement", "check", "export", "publish"];
 const token = "smoke-management-token-no-real-secrets";
 try {
+  const agyVersion = await engine([
+    "run",
+    "--rm",
+    "--pull=never",
+    "--network=none",
+    "--user=1000:1000",
+    "--entrypoint=agy",
+    jobImage,
+    "--version",
+  ]);
+  console.log(`Antigravity CLI ${agyVersion} runs in the job image.`);
   // Exercise the real pinned CLI before replacing it with the lifecycle fixture.
   // A fake app-server never launches a sandbox and cannot detect this regression.
   const sandboxProbe = `
@@ -404,6 +415,21 @@ process.exit(16);
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
   }
+  const agyAuthPath = `/antigravity-auth/${workspaceId}`;
+  const agyLogin = (await request(`${agyAuthPath}/start`, {})) as {
+    state: string;
+    verificationUrl?: string;
+  };
+  if (
+    agyLogin.state !== "pending" ||
+    !agyLogin.verificationUrl ||
+    new URL(agyLogin.verificationUrl).origin !== "https://accounts.google.com"
+  )
+    throw Error("Antigravity CLI did not produce a Google sign-in link");
+  await request(`${agyAuthPath}/logout`, {});
+  console.log(
+    "The runner started Antigravity Google sign-in with the bundled CLI.",
+  );
   const input = {
     workspaceId,
     taskId,

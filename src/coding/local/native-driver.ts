@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { requireThat } from "../../domain.ts";
+import { resolveAntigravityBinary } from "./antigravity-auth.ts";
 import {
   nativeIdentity,
   readNativeProcess,
@@ -136,7 +137,9 @@ export class NativeDriver implements SandboxDriver {
           TELO_AUTH_ROOT: mount("/auth") ?? join(work, "unused-auth"),
           ...(envMount ? { TELO_ENV_ROOT: envMount } : {}),
           TELO_CODEX_BIN: this.settings.CODEX_NATIVE_CODEX_BIN,
-          TELO_AGY_BIN: this.settings.CODEX_NATIVE_AGY_BIN,
+          TELO_AGY_BIN: resolveAntigravityBinary(
+            this.settings.CODEX_NATIVE_AGY_BIN,
+          ),
         },
       },
     );

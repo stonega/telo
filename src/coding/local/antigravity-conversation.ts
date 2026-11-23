@@ -20,6 +20,7 @@ import {
   transcriptEntry,
   transcriptText,
 } from "../transcript.ts";
+import { resolveAntigravityBinary } from "./antigravity-auth.ts";
 import { CodexAuthError } from "./auth-failure.ts";
 import {
   CodexConversationError,
@@ -296,7 +297,10 @@ export async function runAntigravityConversation(options: {
     }
 
     const child = spawn(
-      options.binary ?? process.env.TELO_AGY_BIN ?? "agy",
+      resolveAntigravityBinary(
+        options.binary ?? process.env.TELO_AGY_BIN,
+        options.env,
+      ),
       args,
       {
         cwd: options.cwd,

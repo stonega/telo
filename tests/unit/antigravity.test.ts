@@ -13,6 +13,7 @@ import { join } from "node:path";
 import {
   AntigravityAuth,
   packAntigravityAuthBundle,
+  resolveAntigravityBinary,
   unpackAntigravityAuthBundle,
 } from "../../src/coding/local/antigravity-auth.ts";
 import {
@@ -43,10 +44,26 @@ import {
 import { decrypt } from "../../src/setup/credentials.ts";
 import { grantGitHubAccess, workspace } from "../fixtures.ts";
 
-test("AntigravityAuth starts Google OAuth, completes with pasted code, seals bundle, and isolates workspaces", async () => {
+test("AntigravityAuth can retry after agy is installed, complete OAuth, and isolate workspace credentials", async () => {
   const dir = await mkdtemp(join(tmpdir(), "telo-agy-auth-"));
   try {
     const executable = join(dir, "fake-agy");
+    const auth = new AntigravityAuth(
+      runnerSettings.parse({
+        CODEX_CONTAINER_ENGINE: "native",
+        CODEX_NATIVE_AGY_BIN: executable,
+        CODEX_RUNNER_STATE: dir,
+        CODEX_RUNNER_TOKEN: "management-token".repeat(3),
+      }),
+    );
+    await auth.initialize();
+
+    const ws = randomUUID();
+    await expect(auth.start(ws)).rejects.toThrow(
+      "coding_antigravity_login_unavailable",
+    );
+    expect(await auth.status(ws)).toEqual({ state: "failed" });
+
     await writeFile(
       executable,
       `#!/usr/bin/env node
@@ -71,15 +88,7 @@ rl.once("line", (line) => {
 `,
     );
     await chmod(executable, 0o755);
-    const settings = runnerSettings.parse({
-      CODEX_RUNNER_STATE: dir,
-      CODEX_RUNNER_TOKEN: "management-token".repeat(3),
-      CODEX_PROVIDER_BASE_URL: "https://provider.example/v1",
-    });
-    const auth = new AntigravityAuth(settings, executable);
-    await auth.initialize();
 
-    const ws = randomUUID();
     const started = await auth.start(ws);
     expect(started.state).toBe("pending");
     expect(started.verificationUrl).toContain(
@@ -189,6 +198,7 @@ test("packAntigravityAuthBundle ignores logs, databases, and settings.json", asy
     await mkdir(join(cliDir, "log"), { recursive: true });
     await writeFile(join(cliDir, "log", "cli.log"), "verbose log");
     await writeFile(join(cliDir, "conversation_summaries.db"), "sqlite");
+    await writeFile(join(cliDir, "jetbox_summaries_proto.pb"), "proto");
     await writeFile(join(cliDir, "settings.json"), '{"model":"test"}');
     await writeFile(join(cliDir, "oauth_creds.json"), '{"token":"abc"}');
     const packed = await packAntigravityAuthBundle(dir);
@@ -197,6 +207,34 @@ test("packAntigravityAuthBundle ignores logs, databases, and settings.json", asy
     expect(Object.keys(parsed.files)).toEqual([
       ".gemini/antigravity-cli/oauth_creds.json",
     ]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("resolveAntigravityBinary resolves PATH, the service home, and explicit paths", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "telo-agy-bin-"));
+  try {
+    const localBin = join(dir, ".local", "bin");
+    await mkdir(localBin, { recursive: true });
+    const homeAgy = join(localBin, "agy");
+    await writeFile(homeAgy, "#!/bin/sh\nexit 0\n");
+    await chmod(homeAgy, 0o755);
+    const invalidPath = join(dir, "invalid-bin");
+    await mkdir(join(invalidPath, "agy"), { recursive: true });
+
+    expect(
+      resolveAntigravityBinary("agy", { PATH: invalidPath, HOME: dir }),
+    ).toBe(homeAgy);
+    expect(
+      resolveAntigravityBinary(undefined, { PATH: localBin, HOME: "/empty" }),
+    ).toBe(homeAgy);
+    expect(
+      resolveAntigravityBinary("/custom/path/to/agy", {
+        PATH: localBin,
+        HOME: dir,
+      }),
+    ).toBe("/custom/path/to/agy");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
