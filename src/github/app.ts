@@ -557,7 +557,7 @@ export class GitHubApp {
       })
       .parse(data);
   }
-  async codingPull(token: string, repository: string, number: number) {
+  async codingPullStatus(token: string, repository: string, number: number) {
     const pr = z
       .object({
         number: z.number().int().positive(),
@@ -575,17 +575,29 @@ export class GitHubApp {
           token,
         ),
       );
-    requireThat(pr.state === "open" && !pr.merged, "coding_pr_closed", 409);
-    requireThat(
-      pr.head.repo?.full_name === repository,
-      "coding_pr_target_changed",
-      409,
-    );
     return {
       number: pr.number,
       url: `https://github.com/${repository}/pull/${pr.number}`,
       branch: pr.head.ref,
       headSha: pr.head.sha,
+      repoFullName: pr.head.repo?.full_name ?? null,
+      state: (pr.merged ? "merged" : pr.state) as "open" | "merged" | "closed",
+    };
+  }
+  async codingPull(token: string, repository: string, number: number) {
+    const pr = await this.codingPullStatus(token, repository, number);
+    requireThat(pr.state === "open", "coding_pr_closed", 409);
+    requireThat(
+      pr.repoFullName === repository,
+      "coding_pr_target_changed",
+      409,
+    );
+    return {
+      number: pr.number,
+      url: pr.url,
+      branch: pr.branch,
+      headSha: pr.headSha,
+      state: "open" as const,
     };
   }
   /** Application-owned PR operations; never exposed as an arbitrary model tool. */
@@ -750,6 +762,7 @@ export class GitHubApp {
       url: `https://github.com/${repository}/pull/${number}`,
       branch,
       headSha: sha,
+      state: "open" as const,
     };
   }
   async actOnPullRequest(

@@ -2,7 +2,10 @@ import { type AutonomyMode, workspaceAutonomy } from "../autonomy/policy.ts";
 import { browserEnabled } from "../browser/config.ts";
 import { browserPanelTask, browserRunPrivate } from "../browser/privacy.ts";
 import { type CodingEngine, codingEngineOf } from "../coding/config.ts";
-import type { DevelopmentState } from "../coding/development.ts";
+import {
+  type DevelopmentState,
+  developmentPullClosed,
+} from "../coding/development.ts";
 import { listRepoQueues } from "../coding/queue.ts";
 import { taskList } from "../coding/task-store.ts";
 import type { Store } from "../db/repositories.ts";
@@ -95,6 +98,7 @@ export interface OverviewCodingTaskItem {
   state: DevelopmentState;
   prNumber?: number;
   prUrl?: string;
+  prState?: "open" | "merged" | "closed";
   updatedAt: string;
 }
 
@@ -326,7 +330,7 @@ export async function workspaceOverview(
       if (engine === "antigravity") antigravityCount++;
       else codexCount++;
       if (ACTIVE_CODING_STATES.has(task.state)) active++;
-      if (task.state === "review") review++;
+      if (task.state === "review" && !developmentPullClosed(task)) review++;
       if (task.state === "failed" && task.updatedAt >= oneDayAgoIso) {
         failedCoding24h++;
         if (engine === "antigravity") failedAgy24h++;
@@ -358,7 +362,13 @@ export async function workspaceOverview(
           repository: task.payload.repository,
           engine: codingEngineOf(task.payload),
           state: task.state,
-          ...(task.pr ? { prNumber: task.pr.number, prUrl: task.pr.url } : {}),
+          ...(task.pr
+            ? {
+                prNumber: task.pr.number,
+                prUrl: task.pr.url,
+                ...(task.pr.state ? { prState: task.pr.state } : {}),
+              }
+            : {}),
           updatedAt: task.updatedAt,
         };
       });

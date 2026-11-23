@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { operator } from "../admin/auth.ts";
+import { updateCodingPullState } from "../coding/task-store.ts";
 import type { Store } from "../db/repositories.ts";
 import { type Admin, Fault, requireThat } from "../domain.ts";
 import { resolveMissionWait } from "../orchestration/wakeup.ts";
@@ -203,6 +204,8 @@ export class GitHubWebhooks {
     }
     // Sync connected workspace repository lists on installation/repository lifecycle changes.
     await this.syncRepositoriesFromEvent(operatorId, event, raw);
+    // Sync bound coding task PR states when pull requests close, merge or reopen.
+    await this.syncCodingPullFromEvent(operatorId, event, raw);
     // Dispatch GitHub event-triggered automations and mission waits (check_suite, issues, pull_request).
     await this.dispatchAutomationHooks(operatorId, event, delivery, raw);
     if (!["pull_request", "issues"].includes(event) || raw.action !== "opened")
@@ -244,6 +247,56 @@ export class GitHubWebhooks {
       payload,
     );
     return { accepted: true };
+  }
+  private async syncCodingPullFromEvent(
+    operatorId: string,
+    event: string,
+    raw: Record<string, unknown>,
+  ) {
+    if (event !== "pull_request") return;
+    const action = typeof raw.action === "string" ? raw.action : "";
+    if (!["closed", "reopened"].includes(action)) return;
+    const parsed = z
+      .object({
+        installation: z.object({ id: positiveId }),
+        repository: z.object({ id: positiveId }),
+        pull_request: z.object({
+          number: positiveId,
+          merged: z.boolean().optional(),
+        }),
+      })
+      .safeParse(raw);
+    if (!parsed.success) return;
+    const { installation, repository, pull_request } = parsed.data;
+    const state: "open" | "merged" | "closed" =
+      action === "reopened"
+        ? "open"
+        : pull_request.merged
+          ? "merged"
+          : "closed";
+    for (const id of await this.store.ids()) {
+      const current = await this.store.read(id);
+      if (
+        current.deletion ||
+        current.operatorId !== operatorId ||
+        current.github?.installationId !== installation.id
+      )
+        continue;
+      await this.store.change(id, async (w, sql) => {
+        if (
+          w.deletion ||
+          w.operatorId !== operatorId ||
+          w.github?.installationId !== installation.id
+        )
+          return;
+        await updateCodingPullState(sql, id, {
+          installationId: installation.id,
+          repositoryId: repository.id,
+          number: pull_request.number,
+          state,
+        });
+      });
+    }
   }
   private async syncRepositoriesFromEvent(
     operatorId: string,

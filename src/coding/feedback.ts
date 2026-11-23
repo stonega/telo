@@ -36,7 +36,7 @@ export function codingStatusLabel(task: {
   cancelRequested?: boolean;
   progress?: DevelopmentTask["progress"];
   phase?: string;
-  pr?: unknown;
+  pr?: { state?: "open" | "merged" | "closed" } | unknown;
   error?: string;
   release?: DevelopmentTask["release"];
 }) {
@@ -85,6 +85,10 @@ export function codingStatusLabel(task: {
       labels[task.progress?.stage ?? ""] ?? "Waiting for runner confirmation"
     );
   }
+  const prState =
+    task.pr && typeof task.pr === "object" && "state" in task.pr
+      ? (task.pr as { state?: string }).state
+      : undefined;
   const labels: Record<string, string> = {
     queued: "Queued",
     waiting: "Waiting for your answer",
@@ -93,7 +97,11 @@ export function codingStatusLabel(task: {
       task.phase === "analysis"
         ? "Investigation complete"
         : task.pr
-          ? "PR ready for review"
+          ? prState === "merged"
+            ? "PR merged"
+            : prState === "closed"
+              ? "PR closed"
+              : "PR ready for review"
           : "Ready for review",
     publishing: "Publishing PR",
     failed: "Could not complete",
@@ -138,7 +146,11 @@ export function developmentStatus(task: DevelopmentTask) {
       task.phase === "analysis" || task.result?.status === "analysis"
         ? "I’ve finished looking into it."
         : task.pr
-          ? "Your PR is ready for review."
+          ? task.pr.state === "merged"
+            ? "Your PR has been merged."
+            : task.pr.state === "closed"
+              ? "Your PR has been closed."
+              : "Your PR is ready for review."
           : "The recorded checks passed. Publication has not been requested.",
     failed: codingFailureMessage(task.error ?? "", task.payload),
     cancelled:

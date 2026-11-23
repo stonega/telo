@@ -29,6 +29,7 @@ import {
   type DevelopmentInput,
   type DevelopmentTask,
   developmentPolicy,
+  developmentPullClosed,
   developmentStopped,
 } from "./development.ts";
 import { taskMemoryValid } from "./memory.ts";
@@ -794,7 +795,8 @@ export async function cancelDevelopment(
 ) {
   const task = await taskGet(sql, w.id, id);
   checkDevelopment(w, task, actor, true);
-  if (developmentStopped(task.state)) return task;
+  if (developmentStopped(task.state) || developmentPullClosed(task))
+    return task;
   if (task.cancelRequested) return task;
   task.cancelRequested = true;
   clearProgress(w, "development", task.id);

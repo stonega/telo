@@ -208,6 +208,7 @@ export const developmentRun = z.preprocess(
           url: z.string().url(),
           branch: branchName,
           headSha: z.string().regex(/^[0-9a-f]{40}$/),
+          state: z.enum(["open", "merged", "closed"]).optional(),
         })
         .optional(),
     })
@@ -421,6 +422,16 @@ export interface DevelopmentTask {
 }
 export const developmentStopped = (state: DevelopmentState) =>
   ["failed", "cancelled", "unknown"].includes(state);
+export const developmentPullClosed = (task: {
+  state: string;
+  pr?: { state?: "open" | "merged" | "closed" } | null;
+}) =>
+  task.state === "review" &&
+  (task.pr?.state === "merged" || task.pr?.state === "closed");
+export const developmentTaskSettled = (task: {
+  state: DevelopmentState;
+  pr?: { state?: "open" | "merged" | "closed" } | null;
+}) => developmentStopped(task.state) || developmentPullClosed(task);
 
 function developmentBasePrompt(
   run: DevelopmentRun,

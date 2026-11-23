@@ -78,6 +78,9 @@ export class GitHubService {
     if (!app) return undefined;
     return `https://github.com/${app.config.organization ? `organizations/${encodeURIComponent(app.config.organization)}/settings` : "settings"}/apps/${encodeURIComponent(app.config.slug)}/permissions`;
   }
+  async appForOperator(operatorId: string): Promise<GitHubApp | undefined> {
+    return this.apps.get(operatorId);
+  }
   async memberDirectory(w: Workspace): Promise<GitHubMemberDirectory> {
     const revision = w.github?.revision ?? 0;
     if (!w.github?.installationId)

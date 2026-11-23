@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { evaluateAutonomy } from "../autonomy/policy.ts";
+import { updateCodingPullState } from "../coding/task-store.ts";
 import type { Store } from "../db/repositories.ts";
 import {
   type Approval,
@@ -421,10 +422,21 @@ export class GitHubPullRequests {
     id: string,
     result: Omit<NonNullable<Approval["pullRequest"]>, "startedAt">,
   ) {
-    await this.store.change(workspaceId, (w) => {
+    await this.store.change(workspaceId, async (w, sql) => {
       const a = w.approvals.find((a) => a.id === id);
       if (a?.pullRequest?.state !== "sending") return;
       Object.assign(a.pullRequest, result);
+      if (result.state === "merged" || result.state === "closed") {
+        const parsed = pullActionPayload.safeParse(a.payload);
+        if (parsed.success) {
+          await updateCodingPullState(sql, workspaceId, {
+            installationId: parsed.data.installationId,
+            repositoryId: parsed.data.repositoryId,
+            number: parsed.data.number,
+            state: result.state,
+          });
+        }
+      }
       this.notify(w, a);
     });
   }

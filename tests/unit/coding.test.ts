@@ -1,13 +1,26 @@
 import { expect, test } from "bun:test";
 import { branchName, codingPayload } from "../../src/coding/config.ts";
 import {
+  type DevelopmentTask,
+  developmentPullClosed,
+  developmentTaskSettled,
+} from "../../src/coding/development.ts";
+import {
+  codingStatusLabel,
+  developmentStatus,
+} from "../../src/coding/feedback.ts";
+import {
   checkCodingPayload,
   codingDestination,
 } from "../../src/coding/policy.ts";
 import { codingView, saveCoding } from "../../src/coding/service.ts";
+import { syncWorkspaceCodingPullStates } from "../../src/coding/task-store.ts";
+import type { Sql } from "../../src/db/pool.ts";
+import { GitHubApp } from "../../src/github/app.ts";
 import { decrypt } from "../../src/setup/credentials.ts";
 import { createRun } from "../../src/workspaces/service.ts";
 import { grantGitHubAccess, workspace } from "../fixtures.ts";
+import { githubFixtureConfig } from "../github-fixture.ts";
 
 function present<T>(value: T | undefined): T {
   if (value === undefined) throw new Error("Missing fixture value");
@@ -396,4 +409,181 @@ test("coding requires current GitHub write access and rejects unusable repositor
           : "github_user_access_denied",
     );
   }
+});
+
+test("codingStatusLabel and developmentStatus distinguish open, merged, and closed PRs", () => {
+  const { w } = codingFixture();
+  const payload = codingDestination(w, "101", input);
+  const now = new Date().toISOString();
+  const baseTask: DevelopmentTask = {
+    id: "1e8f2aab-3b09-4e8e-858e-75c20d832517",
+    workspaceId: w.id,
+    actor: "101",
+    botId: "999",
+    chatId: "101",
+    topicId: 0,
+    sourceId: "src-1",
+    payload,
+    policy: { publishByDefault: true },
+    state: "review",
+    phase: "intake",
+    revision: 1,
+    consumedRevision: 1,
+    verifiedRevision: 1,
+    fence: 1,
+    attempts: 1,
+    tokens: 10,
+    activeMs: 1000,
+    canImplement: true,
+    canPublish: true,
+    cancelRequested: false,
+    createdAt: now,
+    updatedAt: now,
+    pr: {
+      number: 42,
+      url: "https://github.com/example/workspace/pull/42",
+      branch: "codex/telo-1",
+      headSha: "a".repeat(40),
+    },
+  };
+
+  expect(codingStatusLabel(baseTask)).toBe("PR ready for review");
+  expect(developmentStatus(baseTask)).toContain("Your PR is ready for review.");
+  expect(developmentPullClosed(baseTask)).toBe(false);
+  expect(developmentTaskSettled(baseTask)).toBe(false);
+
+  const mergedTask: DevelopmentTask = {
+    ...baseTask,
+    pr: { ...present(baseTask.pr), state: "merged" },
+  };
+  expect(codingStatusLabel(mergedTask)).toBe("PR merged");
+  expect(developmentStatus(mergedTask)).toContain("Your PR has been merged.");
+  expect(developmentPullClosed(mergedTask)).toBe(true);
+  expect(developmentTaskSettled(mergedTask)).toBe(true);
+
+  const closedTask: DevelopmentTask = {
+    ...baseTask,
+    pr: { ...present(baseTask.pr), state: "closed" },
+  };
+  expect(codingStatusLabel(closedTask)).toBe("PR closed");
+  expect(developmentStatus(closedTask)).toContain("Your PR has been closed.");
+  expect(developmentPullClosed(closedTask)).toBe(true);
+  expect(developmentTaskSettled(closedTask)).toBe(true);
+});
+
+test("syncWorkspaceCodingPullStates reconciles external PR merge/close states via GitHub API", async () => {
+  const { w } = codingFixture();
+  const payload = codingDestination(w, "101", input);
+  const now = new Date().toISOString();
+  const tasks = new Map<string, DevelopmentTask>();
+  const makeTask = (
+    id: string,
+    prNumber: number,
+    prState?: "open" | "merged" | "closed",
+  ): DevelopmentTask => ({
+    id,
+    workspaceId: w.id,
+    actor: "101",
+    botId: "999",
+    chatId: "101",
+    topicId: 0,
+    sourceId: `src-${prNumber}`,
+    payload,
+    policy: { publishByDefault: true },
+    state: "review",
+    phase: "intake",
+    revision: 1,
+    consumedRevision: 1,
+    verifiedRevision: 1,
+    fence: 1,
+    attempts: 1,
+    tokens: 10,
+    activeMs: 1000,
+    canImplement: true,
+    canPublish: true,
+    cancelRequested: false,
+    createdAt: now,
+    updatedAt: now,
+    pr: {
+      number: prNumber,
+      url: `https://github.com/example/workspace/pull/${prNumber}`,
+      branch: `codex/telo-${prNumber}`,
+      headSha: "a".repeat(40),
+      ...(prState ? { state: prState } : {}),
+    },
+  });
+  const t1 = makeTask("1e8f2aab-3b09-4e8e-858e-75c20d832517", 11);
+  const t2 = makeTask("2e8f2aab-3b09-4e8e-858e-75c20d832517", 12, "open");
+  const t3 = makeTask("3e8f2aab-3b09-4e8e-858e-75c20d832517", 13, "merged");
+  tasks.set(t1.id, t1);
+  tasks.set(t2.id, t2);
+  tasks.set(t3.id, t3);
+
+  const sql = {
+    query: async (text: string, params: unknown[] = []) => {
+      if (
+        text.startsWith(
+          "SELECT data FROM coding_tasks WHERE workspace_id=$1 ORDER BY",
+        )
+      ) {
+        return {
+          rows: [...tasks.values()].map((data) => ({
+            data: structuredClone(data),
+          })),
+          rowCount: tasks.size,
+        };
+      }
+      if (
+        text.startsWith(
+          "SELECT data FROM coding_tasks WHERE workspace_id=$1 AND id=$2",
+        )
+      ) {
+        const found = tasks.get(String(params[1]));
+        return {
+          rows: found ? [{ data: structuredClone(found) }] : [],
+          rowCount: found ? 1 : 0,
+        };
+      }
+      if (text.startsWith("UPDATE coding_tasks SET data=$3")) {
+        const id = String(params[1]);
+        const updated = JSON.parse(String(params[2])) as DevelopmentTask;
+        tasks.set(id, updated);
+        return { rows: [], rowCount: 1 };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+  } as unknown as Sql;
+
+  const queriedPulls: number[] = [];
+  const app = new GitHubApp(githubFixtureConfig, (async (urlInput) => {
+    const u = String(urlInput);
+    if (u.endsWith("/access_tokens")) {
+      return Response.json({
+        token: "ghs_test_read",
+        expires_at: new Date(Date.now() + 3600000).toISOString(),
+      });
+    }
+    const match = u.match(/\/pulls\/(\d+)$/);
+    if (match) {
+      const num = Number(match[1]);
+      queriedPulls.push(num);
+      return Response.json({
+        number: num,
+        state: "closed",
+        merged: num === 11,
+        head: {
+          ref: `codex/telo-${num}`,
+          sha: "a".repeat(40),
+          repo: { full_name: "example/workspace" },
+        },
+      });
+    }
+    return Response.json({ message: "not found" }, { status: 404 });
+  }) as typeof fetch);
+
+  const synced = await syncWorkspaceCodingPullStates(sql, w.id, app);
+  expect(queriedPulls).toEqual([11, 12]);
+  expect(synced.find((t) => t.id === t1.id)?.pr?.state).toBe("merged");
+  expect(synced.find((t) => t.id === t2.id)?.pr?.state).toBe("closed");
+  expect(synced.find((t) => t.id === t3.id)?.pr?.state).toBe("merged");
 });

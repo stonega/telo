@@ -453,6 +453,7 @@ export function codingExtension(
               result: task.result?.summary,
               question: task.question?.text,
               pr: task.pr?.url,
+              prState: task.pr?.state,
             };
           }),
       });
@@ -500,6 +501,7 @@ export function codingExtension(
                 verifiedRevision: task.verifiedRevision,
                 question: memoryCurrent ? task.question?.text : undefined,
                 pr: task.pr?.url,
+                prState: task.pr?.state,
                 error: task.error,
               };
             }),

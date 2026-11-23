@@ -947,6 +947,7 @@ export class DevelopmentExecutor {
             url: status.prUrl,
             branch: t.pr?.branch ?? `${branchPrefix}/telo-${t.id}`,
             headSha: status.publishedSha,
+            state: "open",
           };
           if (t.release?.state === "waiting_merge" && t.pr)
             t.release.pr = { number: t.pr.number, headSha: t.pr.headSha };

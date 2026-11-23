@@ -4,6 +4,7 @@ import type {
   AntigravityPage,
   AntigravitySettings,
 } from "../src/coding/config.ts";
+import { developmentTaskSettled } from "../src/coding/development.ts";
 import { codingFailureMessage } from "../src/coding/failure-messages.ts";
 import { codingStatusLabel } from "../src/coding/feedback.ts";
 import { CodingEnvironments } from "./coding-environments.tsx";
@@ -289,7 +290,7 @@ export function Antigravity({
   const canStop =
     !!stopTask &&
     !stopTask.cancelRequested &&
-    !["failed", "unknown", "cancelled"].includes(stopTask.state);
+    !developmentTaskSettled(stopTask);
 
   const stop = async () => {
     if (!stopping || !canStop || busy || loading) return;
@@ -307,7 +308,7 @@ export function Antigravity({
   };
 
   const activeTasks = tasks.filter(
-    (task) => !["failed", "unknown", "cancelled"].includes(task.state),
+    (task) => !developmentTaskSettled(task),
   ).length;
   const pendingValue = error ? "—" : <Skeleton width="9rem" />;
 
@@ -469,9 +470,7 @@ export function Antigravity({
               GitHub.
             </p>
           </div>
-          {tasks.some(
-            (task) => !["failed", "unknown", "cancelled"].includes(task.state),
-          ) && (
+          {tasks.some((task) => !developmentTaskSettled(task)) && (
             <button
               type="button"
               className="secondary"
@@ -543,9 +542,7 @@ export function Antigravity({
                       )}
                     </td>
                     <td data-label="Actions">
-                      {!["failed", "unknown", "cancelled"].includes(
-                        task.state,
-                      ) && (
+                      {!developmentTaskSettled(task) && (
                         <IconButton
                           icon="stop"
                           className="danger"

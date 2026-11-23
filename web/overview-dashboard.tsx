@@ -66,7 +66,10 @@ function formatShortTime(iso?: string): string {
   });
 }
 
-function codingStatePill(state: OverviewCodingTaskItem["state"]): {
+function codingStatePill(
+  state: OverviewCodingTaskItem["state"],
+  prState?: OverviewCodingTaskItem["prState"],
+): {
   label: string;
   tone: string;
 } {
@@ -86,6 +89,8 @@ function codingStatePill(state: OverviewCodingTaskItem["state"]): {
         tone: "warn",
       };
     case "review":
+      if (prState === "merged") return { label: "PR merged", tone: "good" };
+      if (prState === "closed") return { label: "PR closed", tone: "" };
       return { label: "Ready for review", tone: "good" };
     case "failed":
     case "unknown":
@@ -442,7 +447,7 @@ export function OverviewCodingTasksCard({
       ) : (
         <ul className="overview-item-list">
           {tasks.map((task) => {
-            const pill = codingStatePill(task.state);
+            const pill = codingStatePill(task.state, task.prState);
             const pluginSlug =
               task.engine === "antigravity" ? "antigravity" : "codex";
             const engineLabel =

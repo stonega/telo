@@ -2,13 +2,19 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { browserPanelTask } from "../../browser/privacy.ts";
 import { cloudflareStateWorkspace } from "../../cloudflare/oauth.ts";
+import { developmentPullClosed } from "../../coding/development.ts";
 import {
   antigravityView,
   codingView,
   saveAntigravity,
   saveCoding,
 } from "../../coding/service.ts";
-import { taskGet, taskList, taskSave } from "../../coding/task-store.ts";
+import {
+  syncWorkspaceCodingPullStates,
+  taskGet,
+  taskList,
+  taskSave,
+} from "../../coding/task-store.ts";
 import { requireThat } from "../../domain.ts";
 import { ObsidianService } from "../../obsidian/service.ts";
 import { packageFault } from "../../plugins/package-service.ts";
@@ -77,7 +83,15 @@ export function pluginRoutes(deps: AdminRouteDeps) {
     );
     const page = codingView(workspace, c.get("session").admin);
     page.repositoryRefreshError = refreshError;
-    page.tasks = (await taskList(store.pool, id))
+    const ghApp = await github.appForOperator(workspace.operatorId);
+    page.tasks = (
+      await syncWorkspaceCodingPullStates(
+        store.pool,
+        id,
+        ghApp,
+        (t) => !t.payload.engine || t.payload.engine === "codex",
+      )
+    )
       .filter((t) => !t.payload.engine || t.payload.engine === "codex")
       .map(browserPanelTask);
     if (deviceAuth)
@@ -118,7 +132,15 @@ export function pluginRoutes(deps: AdminRouteDeps) {
     );
     const page = antigravityView(workspace, c.get("session").admin);
     page.repositoryRefreshError = refreshError;
-    page.tasks = (await taskList(store.pool, id))
+    const ghApp = await github.appForOperator(workspace.operatorId);
+    page.tasks = (
+      await syncWorkspaceCodingPullStates(
+        store.pool,
+        id,
+        ghApp,
+        (t) => t.payload.engine === "antigravity",
+      )
+    )
       .filter((t) => t.payload.engine === "antigravity")
       .map(browserPanelTask);
     if (deviceAuth?.antigravityStatus)
@@ -246,7 +268,8 @@ export function pluginRoutes(deps: AdminRouteDeps) {
           const task = await taskGet(sql, w.id, validId(c.req.param("task")));
           if (
             !task.cancelRequested &&
-            !["failed", "cancelled", "unknown"].includes(task.state)
+            !["failed", "cancelled", "unknown"].includes(task.state) &&
+            !developmentPullClosed(task)
           ) {
             task.cancelRequested = true;
             if (
@@ -353,7 +376,8 @@ export function pluginRoutes(deps: AdminRouteDeps) {
         const task = await taskGet(sql, w.id, validId(c.req.param("task")));
         if (
           !task.cancelRequested &&
-          !["failed", "cancelled", "unknown"].includes(task.state)
+          !["failed", "cancelled", "unknown"].includes(task.state) &&
+          !developmentPullClosed(task)
         ) {
           task.cancelRequested = true;
           if (

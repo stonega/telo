@@ -136,6 +136,7 @@ export async function codingTaskContext(
       hasChanges: task.hasChanges,
       replacementTaskId: task.replacementTaskId,
       pr: task.pr?.url,
+      prState: task.pr?.state,
       error: task.error,
       observedAt: new Date().toISOString(),
     });

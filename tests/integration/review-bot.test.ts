@@ -1508,6 +1508,53 @@ class Runner implements LocalRunner {
     });
     expect(ordinary.status).toBe(413);
   });
+  test("GitHub pull_request closed/reopened webhooks update bound coding task PR state", async () => {
+    const f = await telegramFixture();
+    expect((await f.read()).pr?.state).toBe("open");
+    const app = createApp(
+      store,
+      new SetupService(store, "ab".repeat(32), "https://telo.example"),
+      "https://telo.example",
+      undefined,
+      undefined,
+      "ab".repeat(32),
+      undefined,
+      f.service,
+    );
+    const sendWebhook = async (action: string, merged: boolean) => {
+      const body = JSON.stringify({
+        action,
+        installation: { id: 501 },
+        repository: { id: 7001, full_name: "example/workspace" },
+        sender: { id: 42, type: "User" },
+        pull_request: {
+          number: 23,
+          draft: false,
+          merged,
+          head: { sha: published },
+        },
+      });
+      const signature = `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
+      const res = await app.request(`/github/webhook/${f.admin.id}`, {
+        method: "POST",
+        headers: {
+          "x-github-event": "pull_request",
+          "x-github-delivery": randomUUID(),
+          "x-hub-signature-256": signature,
+        },
+        body,
+      });
+      expect(res.status).toBe(200);
+    };
+    await sendWebhook("closed", true);
+    expect((await f.read()).pr?.state).toBe("merged");
+
+    await sendWebhook("reopened", false);
+    expect((await f.read()).pr?.state).toBe("open");
+
+    await sendWebhook("closed", false);
+    expect((await f.read()).pr?.state).toBe("closed");
+  });
   test("confirmed stale-head push rejections restart work; unknown writes do not", async () => {
     const f = await fixture();
     await f.mention();

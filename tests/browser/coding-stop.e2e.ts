@@ -257,6 +257,53 @@ for (const width of [1280, 390]) {
       .screenshot({ path: test.info().outputPath("checkout-failures.png") });
     expect(f.cancellations).toEqual([]);
   });
+  test(`merged or closed review PRs show settled status and hide Stop at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const f = await fixture(page);
+    f.initial.state = "review";
+    f.initial.pr = {
+      number: 10,
+      url: "https://github.com/example/repo/pull/10",
+      branch: "codex/telo-10",
+      headSha: "a".repeat(40),
+      state: "merged",
+    };
+    f.continuous.state = "review";
+    f.continuous.pr = {
+      number: 11,
+      url: "https://github.com/example/repo/pull/11",
+      branch: "codex/telo-11",
+      headSha: "b".repeat(40),
+      state: "closed",
+    };
+    await page.reload();
+    const tasks = page.getByRole("region", { name: "Coding tasks" });
+    const mergedRow = tasks
+      .getByRole("row")
+      .filter({ hasText: f.initial.payload.title });
+    await expect(mergedRow).toContainText("PR merged");
+    await expect(
+      mergedRow.getByRole("button", {
+        name: `Stop coding task ${f.initial.payload.title}`,
+      }),
+    ).toHaveCount(0);
+
+    const closedRow = tasks
+      .getByRole("row")
+      .filter({ hasText: f.continuous.payload.title });
+    await expect(closedRow).toContainText("PR closed");
+    await expect(
+      closedRow.getByRole("button", {
+        name: `Stop coding task ${f.continuous.payload.title}`,
+      }),
+    ).toHaveCount(0);
+    await expect(
+      tasks.getByRole("button", { name: "Check progress" }),
+    ).toHaveCount(0);
+    await expect(page.locator("body")).toHaveJSProperty("scrollWidth", width);
+  });
   for (const mode of ["initial", "continuous"] as const) {
     test(`${mode} Stop requires confirmation at ${width}px`, async ({
       page,
