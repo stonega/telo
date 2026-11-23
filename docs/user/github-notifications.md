@@ -25,7 +25,8 @@ connected repository:
   they can still subscribe manually.
 - If a maintainer already has a personal subscription (enabled or paused) for a
   repository, that personal rule takes precedence so no duplicate alerts are
-  sent.
+  sent. Explicit personal subscriptions notify on all selected events, including
+  PRs and issues opened by the subscriber themselves.
 - Workspace administrators can disable or re-enable automatic maintainer alerts
   from **Plugins → GitHub notifications → Repository maintainers → Edit**.
   Disabling stops queued automatic alerts; re-enabling covers only new events

@@ -358,8 +358,8 @@ export function GitHubNotificationSettings({
         <p>
           Notifications run independently of Review Bot and Codex. Draft PRs are
           included and labeled. Personal subscriptions cover events opened after
-          subscribing; automatic maintainer alerts skip items opened by the same
-          maintainer.
+          subscribing (including items you open yourself); automatic maintainer
+          alerts skip items opened by the same maintainer.
         </p>
         {page && (
           <p>
@@ -368,9 +368,21 @@ export function GitHubNotificationSettings({
           </p>
         )}
         <p>
-          In your GitHub App settings, enable webhook delivery to Telo’s public
-          HTTPS address and subscribe to Issues and Pull requests. Existing Apps
-          need Issues added. A saved secret does not verify GitHub delivery.
+          In your{" "}
+          {page?.appPermissionsUrl ? (
+            <a
+              href={page.appPermissionsUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              GitHub App settings
+            </a>
+          ) : (
+            "GitHub App settings"
+          )}
+          , enable webhook delivery to Telo’s public HTTPS address and subscribe
+          to Issues and Pull requests. Existing Apps need Issues added. A saved
+          secret does not verify GitHub delivery.
         </p>
       </section>
       {settingsDraft && (

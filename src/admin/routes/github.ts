@@ -199,6 +199,7 @@ export function githubRoutes(deps: AdminRouteDeps) {
         !!(await github.webhooks.configured(w.operatorId)),
       ),
       webhookUrl: `${deploymentOrigin(d, origin)}/github/webhook/${w.operatorId}`,
+      appPermissionsUrl: await github.appPermissionsUrl(w.operatorId),
       canConfigureWebhook: admin.operator && admin.id === w.operatorId,
     });
   });
@@ -223,6 +224,7 @@ export function githubRoutes(deps: AdminRouteDeps) {
         !!(await github.webhooks.configured(w.operatorId)),
       ),
       webhookUrl: `${deploymentOrigin(d, origin)}/github/webhook/${w.operatorId}`,
+      appPermissionsUrl: await github.appPermissionsUrl(w.operatorId),
       canConfigureWebhook: admin.operator && admin.id === w.operatorId,
     });
   });
@@ -246,6 +248,7 @@ export function githubRoutes(deps: AdminRouteDeps) {
           !!(await github.webhooks.configured(w.operatorId)),
         ),
         webhookUrl: `${deploymentOrigin(d, origin)}/github/webhook/${w.operatorId}`,
+        appPermissionsUrl: await github.appPermissionsUrl(w.operatorId),
         canConfigureWebhook: admin.operator && admin.id === w.operatorId,
       });
     },

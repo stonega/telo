@@ -73,6 +73,11 @@ export class GitHubService {
   private async callback() {
     return `${await publicOrigin(this.store, this.origin)}/api/admin/github/callback`;
   }
+  async appPermissionsUrl(operatorId: string): Promise<string | undefined> {
+    const app = await this.apps.get(operatorId);
+    if (!app) return undefined;
+    return `https://github.com/${app.config.organization ? `organizations/${encodeURIComponent(app.config.organization)}/settings` : "settings"}/apps/${encodeURIComponent(app.config.slug)}/permissions`;
+  }
   async memberDirectory(w: Workspace): Promise<GitHubMemberDirectory> {
     const revision = w.github?.revision ?? 0;
     if (!w.github?.installationId)

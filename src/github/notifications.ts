@@ -155,6 +155,7 @@ export type NotificationInput = z.infer<typeof notificationInput>;
 export interface NotificationPage {
   canManage: boolean;
   webhookUrl?: string;
+  appPermissionsUrl?: string;
   canConfigureWebhook?: boolean;
   settings: {
     autoNotifyMaintainers: boolean;

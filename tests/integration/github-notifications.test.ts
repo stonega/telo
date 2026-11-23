@@ -512,38 +512,27 @@ const url = process.env.TEST_DATABASE_URL;
       [admin.id],
     );
   });
-  test("webhook failure recovery persists retry reservations, groups GUIDs and bounds retries", async () => {
+  test("webhook failure recovery persists retry reservations, groups GUIDs, preserves 64-bit delivery IDs and bounds retries", async () => {
     await fixture();
     let retries = 0;
     let cursor = "";
+    const redeliveredUrls: string[] = [];
     const transport = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const u = String(input);
       expect(init?.headers).toHaveProperty("authorization");
       if (u.includes("/attempts")) {
         retries++;
+        redeliveredUrls.push(u);
         return new Response(null, { status: 202 });
       }
       cursor = new URL(u).searchParams.get("cursor") ?? "";
-      return Response.json([
+      return new Response(
+        `[{"id":3855446599243145216,"guid":"failed","status_code":500,"delivered_at":"${new Date().toISOString()}"},{"id":2,"guid":"succeeded","status_code":500,"delivered_at":"${new Date().toISOString()}"},{"id":3,"guid":"succeeded","status_code":200,"delivered_at":"${new Date().toISOString()}"}]`,
         {
-          id: 1,
-          guid: "failed",
-          status_code: 500,
-          delivered_at: new Date().toISOString(),
+          status: 200,
+          headers: { "content-type": "application/json" },
         },
-        {
-          id: 2,
-          guid: "succeeded",
-          status_code: 500,
-          delivered_at: new Date().toISOString(),
-        },
-        {
-          id: 3,
-          guid: "succeeded",
-          status_code: 200,
-          delivered_at: new Date().toISOString(),
-        },
-      ]);
+      );
     }) as typeof fetch;
     const apps = new GitHubApps(
       store,
@@ -561,6 +550,9 @@ const url = process.env.TEST_DATABASE_URL;
       await new GitHubWebhooks(store, apps, key).recover(admin.id);
     }
     expect(retries).toBe(3);
+    expect(redeliveredUrls[0]).toBe(
+      "https://api.github.com/app/hook/deliveries/3855446599243145216/attempts",
+    );
     expect(cursor).toBe("");
     await new GitHubWebhooks(store, apps, key).recover(admin.id);
     expect(retries).toBe(3);

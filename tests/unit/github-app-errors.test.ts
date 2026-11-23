@@ -90,3 +90,33 @@ test("unrelated GitHub rejections and invalid responses stay generic without lea
   );
   await expect(app.user("fixture")).rejects.toThrow("github_unavailable");
 });
+
+test("webhookDeliveries and redeliverWebhook preserve 64-bit delivery IDs beyond Number.MAX_SAFE_INTEGER", async () => {
+  const redelivered: string[] = [];
+  const app = new GitHubApp(githubFixtureConfig, (async (
+    input: RequestInfo | URL,
+  ) => {
+    const url = String(input);
+    if (url.includes("/attempts")) {
+      redelivered.push(url);
+      return new Response(null, { status: 202 });
+    }
+    return new Response(
+      `[{"id":3855446599243145216,"guid":"a6c75bf8-e645-11f1-97ec-ddc8ff42e940","status_code":502,"delivered_at":"2026-11-22T07:23:46.589Z"}]`,
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }) as typeof fetch);
+  const deliveries = await app.webhookDeliveries();
+  expect(deliveries.items).toHaveLength(1);
+  expect(deliveries.items[0]?.id).toBe("3855446599243145216");
+  await app.redeliverWebhook(deliveries.items[0]?.id ?? "");
+  expect(redelivered).toEqual([
+    "https://api.github.com/app/hook/deliveries/3855446599243145216/attempts",
+  ]);
+  await expect(app.redeliverWebhook(3855446599243145000)).rejects.toThrow(
+    "invalid_github_delivery",
+  );
+  await expect(app.redeliverWebhook("0")).rejects.toThrow(
+    "invalid_github_delivery",
+  );
+});

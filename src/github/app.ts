@@ -127,7 +127,7 @@ export class GitHubApp {
     body?: unknown,
     signal?: AbortSignal,
     method?: "PATCH",
-    metadata?: { headers?: Headers; empty?: boolean },
+    metadata?: { headers?: Headers; empty?: boolean; rawText?: boolean },
   ) {
     try {
       signal?.throwIfAborted();
@@ -189,7 +189,10 @@ export class GitHubApp {
       }
       requireThat(response.ok, "github_unavailable", 502);
       if (metadata) metadata.headers = response.headers;
-      return metadata?.empty ? undefined : await response.json();
+      if (metadata?.empty) return undefined;
+      if (metadata?.rawText && typeof response.text === "function")
+        return await response.text();
+      return await response.json();
     } catch (error) {
       if (error instanceof Fault) throw error;
       throw new Fault("github_unavailable", 502);
@@ -198,8 +201,10 @@ export class GitHubApp {
   async webhookDeliveries(cursor?: string) {
     const parameters = new URLSearchParams({ per_page: "100" });
     if (cursor) parameters.set("cursor", cursor);
-    const metadata: { headers?: Headers } = {};
-    const data = await this.request(
+    const metadata: { headers?: Headers; rawText?: boolean } = {
+      rawText: true,
+    };
+    const raw = await this.request(
       `https://api.github.com/app/hook/deliveries?${parameters}`,
       this.jwt(),
       undefined,
@@ -207,10 +212,17 @@ export class GitHubApp {
       undefined,
       metadata,
     );
+    const data =
+      typeof raw === "string"
+        ? JSON.parse(raw.replace(/"id"\s*:\s*([1-9]\d*)/g, '"id":"$1"'))
+        : raw;
     const items = z
       .array(
         z.object({
-          id: z.number().int().positive(),
+          id: z.union([
+            z.string().regex(/^[1-9]\d{0,19}$/),
+            z.number().int().positive().transform(String),
+          ]),
           guid: z.string().max(100),
           status_code: z
             .number()
@@ -231,10 +243,16 @@ export class GitHubApp {
         : undefined,
     };
   }
-  async redeliverWebhook(id: number) {
-    requireThat(Number.isSafeInteger(id) && id > 0, "invalid_github_delivery");
+  async redeliverWebhook(id: number | string) {
+    const deliveryId =
+      typeof id === "number" && Number.isSafeInteger(id) && id > 0
+        ? String(id)
+        : typeof id === "string" && /^[1-9]\d{0,19}$/.test(id)
+          ? id
+          : "";
+    requireThat(deliveryId.length > 0, "invalid_github_delivery");
     await this.request(
-      `https://api.github.com/app/hook/deliveries/${id}/attempts`,
+      `https://api.github.com/app/hook/deliveries/${deliveryId}/attempts`,
       this.jwt(),
       {},
       undefined,

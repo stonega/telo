@@ -8,6 +8,8 @@ async function fixture(page: Page, initial?: Partial<NotificationPage>) {
     canManage: true,
     canConfigureWebhook: true,
     webhookUrl: "https://notifications.example/github/webhook/operator",
+    appPermissionsUrl:
+      "https://github.com/settings/apps/telo-fixture/permissions",
     webhookConfigured: true,
     settings: {
       autoNotifyMaintainers: true,
@@ -315,6 +317,12 @@ test("shared webhook settings keep secrets in their explicit editor", async ({
     name: "GitHub notification delivery",
   });
   await expect(delivery).toContainText(f.data.webhookUrl ?? "");
+  await expect(
+    delivery.getByRole("link", { name: "GitHub App settings" }),
+  ).toHaveAttribute(
+    "href",
+    "https://github.com/settings/apps/telo-fixture/permissions",
+  );
   await page.getByRole("button", { name: "Edit webhook secret" }).click();
   const editor = page.getByRole("dialog", { name: "Edit webhook secret" });
   await editor.getByRole("button", { name: "Save secret" }).click();
