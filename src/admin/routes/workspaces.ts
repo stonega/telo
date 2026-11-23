@@ -3,7 +3,6 @@ import { z } from "zod";
 import { attemptCost } from "../../agent/limits.ts";
 import { modelCapabilities } from "../../agent/runtime.ts";
 import { browserPanelRun, browserRunPrivate } from "../../browser/privacy.ts";
-import { taskList } from "../../coding/task-store.ts";
 import { cancelRequest } from "../../coding/tasks.ts";
 import {
   requireThat,
@@ -52,12 +51,12 @@ import {
 } from "../../workspaces/policy.ts";
 import { createRun, visibleRuns } from "../../workspaces/service.ts";
 import { session, throttle } from "../auth.ts";
+import { workspaceOverview } from "../overview.ts";
 import { runSummaries } from "../run-history.ts";
 import {
   historyPage,
   runThreadKey,
   threadDetail,
-  threadGroups,
   threadKey,
   threadSummaries,
 } from "../thread-history.ts";
@@ -137,44 +136,9 @@ export function workspaceRoutes(deps: AdminRouteDeps) {
     });
     switch (c.req.param("resource")) {
       case "overview": {
-        const admin = c.get("session").admin;
-        const operatorView = actor === w.operatorId;
-        const deployment =
-          admin.operator && w.operatorId === admin.id
-            ? await store.deployment()
-            : undefined;
-        return c.json({
-          id: w.id,
-          settings: w.settings,
-          version: w.version,
-          counts: {
-            members: w.members.filter((m) => m.active).length,
-            runs: w.runs.length,
-            threads: threadGroups(w).size,
-            workflows: w.workflows.filter((f) => f.status !== "deleted").length,
-            ...(operatorView
-              ? {
-                  codingTasks: (await taskList(store.pool, w.id)).length,
-                }
-              : {}),
-          },
-          connections: deployment
-            ? {
-                bot: {
-                  configured: !!deployment.credentials.bot && !!deployment.bot,
-                  username: deployment.credentials.bot
-                    ? deployment.bot?.username
-                    : undefined,
-                },
-                github: {
-                  connected: !!w.github?.installationId,
-                  account: w.github?.account,
-                  repositories: w.github?.repositories.length ?? 0,
-                  allRepositories: !!w.github?.allRepositories,
-                },
-              }
-            : undefined,
-        });
+        return c.json(
+          await workspaceOverview(store, w, c.get("session").admin, actor),
+        );
       }
       case "settings": {
         const deployment = await store.deployment();

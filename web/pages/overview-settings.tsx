@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink } from "react-router";
+import type { OverviewResponse } from "../../src/admin/overview.ts";
 import type { Audit, Session, Settings } from "../../src/domain.ts";
 import { settingsSchema } from "../../src/domain.ts";
 import {
@@ -16,6 +17,11 @@ import {
 import { GitHubConnection } from "../github.tsx";
 import { IconButton } from "../icon-button.tsx";
 import { Modal, ModalActions } from "../modal.tsx";
+import {
+  formatOverviewStatSub,
+  OverviewCapabilitiesCard,
+  OverviewDashboard,
+} from "../overview-dashboard.tsx";
 import { Select } from "../select.tsx";
 import { currencyField, workspaceFields } from "../settings-fields.ts";
 import { Skeleton } from "../skeleton.tsx";
@@ -68,20 +74,11 @@ export function ReadPage({
   resource: string;
   admin: Session["admin"];
 }) {
-  const { data, error, reload, loading } = useData<{
-    counts?: {
-      members: number;
-      runs: number;
-      threads: number;
-      workflows: number;
-      codingTasks?: number;
-    };
-    connections?: {
-      bot: { configured: boolean; username?: string };
-      github: { connected: boolean; account?: string; repositories: number };
-    };
-    items?: Audit[];
-  }>(`/api/admin/workspaces/${id}/${resource}`);
+  const { data, error, reload, loading } = useData<
+    Partial<OverviewResponse> & {
+      items?: Audit[];
+    }
+  >(`/api/admin/workspaces/${id}/${resource}`);
   const notify = useToast();
   const [managingBot, setManagingBot] = useState(false);
   const [managingGitHub, setManagingGitHub] = useState(false);
@@ -95,6 +92,7 @@ export function ReadPage({
         ? { codingTasks: undefined }
         : {}),
   };
+  const hasCodingTasksCard = "codingTasks" in counts;
   return (
     <Page
       title={resource === "overview" ? "Your team, in view" : "Audit history"}
@@ -120,22 +118,37 @@ export function ReadPage({
             aria-label="Workspace counts"
             aria-busy={loading}
           >
-            {Object.entries(counts).map(([key, value]) => (
-              <NavLink
-                key={key}
-                to={`/admin/${key === "codingTasks" ? "plugins/codex" : key}?workspace=${id}${key === "codingTasks" ? "#coding-tasks" : ""}`}
-                aria-label={`${value !== undefined ? `${value} ` : loading ? "" : "Unavailable "}${key === "codingTasks" ? "coding tasks" : key}. View details`}
-              >
-                <strong>
-                  {value ??
-                    (loading ? <Skeleton width="64px" height="35px" /> : "—")}
-                </strong>
-                <span>{key === "codingTasks" ? "Coding tasks" : key}</span>
-              </NavLink>
-            ))}
+            {Object.entries(counts).map(([key, value]) => {
+              const sub = formatOverviewStatSub(
+                key,
+                data?.metrics,
+                data?.counts?.runs,
+              );
+              return (
+                <NavLink
+                  key={key}
+                  to={`/admin/${key === "codingTasks" ? "plugins/codex" : key}?workspace=${id}${key === "codingTasks" ? "#coding-tasks" : ""}`}
+                  aria-label={`${value !== undefined ? `${value} ` : loading ? "" : "Unavailable "}${key === "codingTasks" ? "coding tasks" : key}. View details`}
+                >
+                  <strong>
+                    {value ??
+                      (loading ? <Skeleton width="64px" height="35px" /> : "—")}
+                  </strong>
+                  <span>{key === "codingTasks" ? "Coding tasks" : key}</span>
+                  {sub && (
+                    <small className="stat-sub" aria-hidden="true">
+                      {sub}
+                    </small>
+                  )}
+                </NavLink>
+              );
+            })}
           </section>
           {(data?.connections || (!data && admin.operator)) && (
-            <section className="overview-connections" aria-label="Connections">
+            <section
+              className={`overview-connections${data?.setup ? " has-capabilities" : ""}`}
+              aria-label="Connections"
+            >
               <section
                 className="card overview-connection-card"
                 aria-label="Telegram bot"
@@ -238,8 +251,30 @@ export function ReadPage({
                   Manage GitHub
                 </button>
               </section>
+              {data?.setup && (
+                <OverviewCapabilitiesCard
+                  workspaceId={id}
+                  setup={data.setup}
+                  operator={admin.operator}
+                />
+              )}
             </section>
           )}
+          {!data?.connections && !admin.operator && data?.setup && (
+            <div className="overview-standalone-capabilities">
+              <OverviewCapabilitiesCard
+                workspaceId={id}
+                setup={data.setup}
+                operator={false}
+              />
+            </div>
+          )}
+          <OverviewDashboard
+            workspaceId={id}
+            data={data}
+            loading={loading}
+            operatorView={hasCodingTasksCard}
+          />
           {managingBot && (
             <TelegramBotDialog
               onClose={() => setManagingBot(false)}

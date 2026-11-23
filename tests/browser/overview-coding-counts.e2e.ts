@@ -83,6 +83,29 @@ for (const width of [1280, 390]) {
         name: "3 coding tasks. View details",
       });
       await expect(card).toBeVisible();
+      await expect(card.locator(".stat-sub")).toContainText(
+        "1 active · 2 in review",
+      );
+      for (const regionName of [
+        "Model and capabilities",
+        "Recent coding tasks",
+        "Recent threads",
+        "7-day model usage",
+        "Missions and automations",
+      ]) {
+        await expect(
+          page.getByRole("region", { name: regionName, exact: true }),
+        ).toBeVisible();
+      }
+      const recentCoding = page.getByRole("region", {
+        name: "Recent coding tasks",
+        exact: true,
+      });
+      for (const task of [direct, completed, completedTask]) {
+        await expect(
+          recentCoding.getByText(task.payload.title, { exact: true }),
+        ).toBeVisible();
+      }
       await card.hover();
       expect(
         await card.evaluate((el) => ({
