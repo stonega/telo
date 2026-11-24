@@ -45,7 +45,7 @@ const url = process.env.TEST_DATABASE_URL;
     await root.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
     await root.end();
   });
-  async function fixture(chatId = "101") {
+  async function fixture(chatId = "101", engine?: "codex" | "antigravity") {
     const w = workspace();
     w.operatorId = operator;
     w.github = {
@@ -69,6 +69,16 @@ const url = process.env.TEST_DATABASE_URL;
         development: developmentPolicy.parse({}),
       },
     };
+    if (engine === "antigravity") {
+      w.antigravity = {
+        revision: 1,
+        settings: {
+          enabled: true,
+          authMode: "google_oauth",
+          development: developmentPolicy.parse({}),
+        },
+      };
+    }
     grantGitHubAccess(w, ["101", "202"]);
     const run = createRun(
       w,
@@ -89,7 +99,18 @@ const url = process.env.TEST_DATABASE_URL;
       [w.id, operator, JSON.stringify(w)],
     );
     const task = await store.change(w.id, (current, sql) =>
-      startDevelopment(sql, current, run.id, "101", 7001, [source.id], "999"),
+      startDevelopment(
+        sql,
+        current,
+        run.id,
+        "101",
+        7001,
+        [source.id],
+        "999",
+        "",
+        undefined,
+        engine,
+      ),
     );
     let membership = "member";
     const setup = new SetupService(store, key, "http://localhost:3000", () => ({
@@ -131,9 +152,9 @@ const url = process.env.TEST_DATABASE_URL;
     const allowed = await f.request();
     expect(allowed.status).toBe(200);
     expect(allowed.headers.get("cache-control")).toBe("no-store");
-    expect((await allowed.json()).items[0].text).toBe(
-      "Show the actual coding conversation",
-    );
+    const payload = await allowed.json();
+    expect(payload.task.engine).toBe("codex");
+    expect(payload.items[0].text).toBe("Show the actual coding conversation");
     expect((await f.request(202)).status).toBe(403);
     await store.change(f.w.id, (w) => {
       const m = w.members.find((m) => m.id === "101");
@@ -301,5 +322,12 @@ const url = process.env.TEST_DATABASE_URL;
       }),
     });
     expect(denied.status).toBe(401);
+  });
+  test("history response reports antigravity engine for Antigravity CLI tasks", async () => {
+    const f = await fixture("101", "antigravity");
+    const res = await f.request();
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.task.engine).toBe("antigravity");
   });
 });

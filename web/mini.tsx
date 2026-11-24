@@ -22,6 +22,8 @@ type TelegramApp = {
   contentSafeAreaInset?: Record<string, number>;
   ready(): void;
   expand(): void;
+  setHeaderColor?: (color: string) => void;
+  setBackgroundColor?: (color: string) => void;
   BackButton?: { hide(): void };
   MainButton?: { hide(): void };
   onEvent(name: string, handler: () => void): void;
@@ -57,7 +59,13 @@ const errors: Record<string, string> = {
   miniapp_task_unavailable: "This task conversation is no longer available.",
   not_found: "This task conversation is no longer available.",
 };
-const Message = memo(function Message({ item }: { item: HistoryItem }) {
+const Message = memo(function Message({
+  item,
+  engineLabel,
+}: {
+  item: HistoryItem;
+  engineLabel: string;
+}) {
   return (
     <article
       className={`mini-message mini-${item.role}`}
@@ -65,7 +73,8 @@ const Message = memo(function Message({ item }: { item: HistoryItem }) {
     >
       <div className="mini-message-meta">
         <strong>
-          {item.author ?? names[item.role]}
+          {item.author ??
+            (item.role === "codex" ? engineLabel : names[item.role])}
           {item.role !== "activity" && item.title ? ` · ${item.title}` : ""}
         </strong>
         <time dateTime={item.at}>
@@ -96,8 +105,8 @@ const Message = memo(function Message({ item }: { item: HistoryItem }) {
           {(
             {
               queued: "Queued",
-              accepted: "Accepted by Codex",
-              read: "Read by Codex",
+              accepted: `Accepted by ${engineLabel}`,
+              read: `Read by ${engineLabel}`,
               answered: "Answered",
               unknown: "Delivery unconfirmed",
               cancelled: "Cancelled",
@@ -234,13 +243,13 @@ function MiniApp() {
     mounted.current = true;
     controller.current = new AbortController();
     const syncTheme = () => {
-      document.documentElement.dataset.theme = app?.colorScheme ?? "light";
-      for (const [key, value] of Object.entries(app?.themeParams ?? {}))
-        if (/^#[a-f\d]{6}$/i.test(value))
-          document.documentElement.style.setProperty(
-            `--tg-theme-${key.replaceAll("_", "-")}`,
-            value,
-          );
+      const dark = app?.colorScheme === "dark";
+      document.documentElement.dataset.theme = dark ? "dark" : "light";
+      const canvas = dark ? "#151210" : "#faf7f2";
+      try {
+        app?.setHeaderColor?.(canvas);
+        app?.setBackgroundColor?.(canvas);
+      } catch {}
       if (app?.viewportStableHeight)
         document.documentElement.style.setProperty(
           "--mini-height",
@@ -329,19 +338,23 @@ function MiniApp() {
       if (mounted.current) setOlderBusy(false);
     }
   };
+  const engineLabel =
+    history?.task.engine === "antigravity" ? "Antigravity CLI" : "Codex";
   return (
     <main className="mini-shell">
       <header className="mini-heading">
-        <span className="mini-eyebrow">Telo · Codex</span>
+        <span className="mini-eyebrow">
+          {history ? `Telo · ${engineLabel}` : "Telo"}
+        </span>
         <h1>{history?.task.title || "Task conversation"}</h1>
         {history && (
-          <>
+          <div className="mini-heading-meta">
             <p className="mini-repository">{history.task.repository}</p>
-            <p className="mini-status">
+            <p className="mini-status" data-state={history.task.state}>
               <span aria-hidden="true" />
               {history.task.status}
             </p>
-          </>
+          </div>
         )}
       </header>
       {error && (
@@ -378,8 +391,8 @@ function MiniApp() {
           <>
             <p className="mini-coverage">
               {history.recordingAvailable
-                ? "Recorded Codex messages and task exchanges. Interrupted partial output may be unavailable."
-                : "Earlier Codex messages were not recorded. Available task exchanges are shown."}
+                ? `Recorded ${engineLabel} messages and task exchanges. Interrupted partial output may be unavailable.`
+                : `Earlier ${engineLabel} messages were not recorded. Available task exchanges are shown.`}
             </p>
             {history.hasMore && (
               <button
@@ -401,7 +414,7 @@ function MiniApp() {
           </p>
         )}
         {items.map((item) => (
-          <Message key={item.id} item={item} />
+          <Message key={item.id} item={item} engineLabel={engineLabel} />
         ))}
       </section>
       {newMessages && (

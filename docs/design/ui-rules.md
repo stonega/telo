@@ -463,6 +463,13 @@ when implementing or reviewing a change.
   official guidance as closely as practical. Platform details were checked against
   the [official Mini App documentation](https://core.telegram.org/bots/webapps),
   including its [design guidelines](https://core.telegram.org/bots/webapps#design-guidelines).
+- **Source update:** 2026-11-24 — the user requested updating the Mini App task
+  viewer and overall Mini App pages to match the admin panel's visual style.
+  Keep Telegram's live light/dark `colorScheme` switching, viewport, safe-area
+  handling, and native navigation/authentication rules while styling Mini App
+  surfaces, typography, status pills, buttons, inputs, and modals with the admin
+  panel's `--ui-*` warm origami palette and tinting the Telegram Mini App chrome
+  (`setHeaderColor` / `setBackgroundColor`) to match the active canvas.
 - **Acceptance:** Verify light/dark and live theme changes, compact/expanded
   viewports, safe-area spacing, long-history scrolling, back/close behavior and
   loading/empty/error states on mobile and desktop Telegram clients. Use only

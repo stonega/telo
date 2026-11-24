@@ -14,6 +14,10 @@ function message(i: number): HistoryItem {
 async function fixture(
   page: Page,
   initial = Array.from({ length: 25 }, (_, i) => message(i)),
+  options: {
+    engine?: "codex" | "antigravity";
+    recordingAvailable?: boolean;
+  } = {},
 ) {
   let items = initial,
     status = 200,
@@ -73,12 +77,13 @@ async function fixture(
         repository: "example/workspace",
         status: "Implementing",
         state: "working",
+        engine: options.engine ?? "codex",
       },
       items: selected,
       before: older ? "oldest" : items[0]?.id,
       after: selected.at(-1)?.id ?? body.after,
       hasMore: older ? false : body.after ? false : hasOlder,
-      recordingAvailable: true,
+      recordingAvailable: options.recordingAvailable ?? true,
     };
     return route.fulfill({ json: result });
   });
@@ -127,6 +132,12 @@ for (const viewport of [
     await expect(
       page.getByRole("heading", { name: "Fix repository pagination" }),
     ).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    expect(
+      await page
+        .locator("html")
+        .evaluate((e) => getComputedStyle(e).backgroundColor),
+    ).toBe("rgb(250, 247, 242)");
     await page.screenshot({
       path: `test-results/miniapp-${viewport.width}-light.png`,
     });
@@ -183,7 +194,7 @@ for (const viewport of [
       await page
         .locator("html")
         .evaluate((e) => getComputedStyle(e).backgroundColor),
-    ).toBe("rgb(23, 33, 43)");
+    ).toBe("rgb(21, 18, 16)");
     await page.screenshot({
       path: `test-results/miniapp-${viewport.width}-dark.png`,
     });
@@ -269,4 +280,50 @@ test("empty and loading states remain readable and a direct browser visit explai
     "Open this conversation from its Telegram task message",
   );
   await page.screenshot({ path: "test-results/miniapp-open-error.png" });
+});
+test("Antigravity CLI tasks display Antigravity CLI labels instead of Codex", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const f = await fixture(
+    page,
+    [
+      {
+        ...message(0),
+        role: "user",
+        author: "You",
+        state: "read",
+        text: "Update landing page with Antigravity.",
+      },
+      {
+        ...message(1),
+        role: "codex",
+        text: "Inspecting the landing page layout.",
+      },
+      {
+        ...message(2),
+        role: "activity",
+        title: "Tool · read_file",
+        text: "web/index.html",
+      },
+    ],
+    { engine: "antigravity" },
+  );
+  await f.open();
+  await expect(page.locator(".mini-eyebrow")).toHaveText(
+    "Telo · Antigravity CLI",
+  );
+  await expect(page.locator(".mini-coverage")).toContainText(
+    "Recorded Antigravity CLI messages and task exchanges.",
+  );
+  await expect(
+    page.locator(".mini-codex .mini-message-meta strong"),
+  ).toHaveText("Antigravity CLI");
+  await expect(page.locator(".mini-receipt")).toHaveText(
+    "Read by Antigravity CLI",
+  );
+  await expect(page.locator("body")).not.toContainText("Codex");
+  await page.screenshot({
+    path: "test-results/miniapp-antigravity-390-light.png",
+  });
 });

@@ -229,13 +229,13 @@ export function BrowserMini() {
     abort.current = new AbortController();
     document.title = "Telo · My browser";
     const theme = () => {
-      document.documentElement.dataset.theme = app?.colorScheme ?? "light";
-      for (const [key, value] of Object.entries(app?.themeParams ?? {}))
-        if (/^#[a-f\d]{6}$/i.test(value))
-          document.documentElement.style.setProperty(
-            `--tg-theme-${key.replaceAll("_", "-")}`,
-            value,
-          );
+      const dark = app?.colorScheme === "dark";
+      document.documentElement.dataset.theme = dark ? "dark" : "light";
+      const canvas = dark ? "#151210" : "#faf7f2";
+      try {
+        app?.setHeaderColor?.(canvas);
+        app?.setBackgroundColor?.(canvas);
+      } catch {}
       if (app?.viewportStableHeight)
         document.documentElement.style.setProperty(
           "--mini-height",

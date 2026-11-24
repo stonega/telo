@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
+import { type CodingEngine, codingEngineOf } from "../coding/config.ts";
 import type { DevelopmentTask } from "../coding/development.ts";
 import { codingStatusLabel } from "../coding/feedback.ts";
 import { developmentInputPresent } from "../coding/input-sources.ts";
@@ -29,6 +30,7 @@ export interface TaskHistory {
     repository: string;
     status: string;
     state: string;
+    engine?: CodingEngine;
     prUrl?: string;
   };
   items: HistoryItem[];
@@ -203,6 +205,7 @@ export function miniAppRoutes(
         repository: task.payload.repository,
         status: codingStatusLabel(task),
         state: task.state,
+        engine: codingEngineOf(task.payload),
         prUrl: task.pr?.url,
       },
       items,
