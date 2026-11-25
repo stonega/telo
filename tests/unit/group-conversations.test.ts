@@ -11,6 +11,7 @@ import type { Run, Workspace } from "../../src/domain.ts";
 import { sweep } from "../../src/privacy/service.ts";
 import { followupCandidate } from "../../src/telegram/followup.ts";
 import { type Message, updateSchema } from "../../src/telegram/router.ts";
+import { approvalCardSync } from "../../src/telegram/webhook.ts";
 import {
   commitDiscussions,
   memoryReferences,
@@ -369,6 +370,74 @@ test("natural follow-up accepts captioned media and closes attention on bare med
   if (!barePhoto) throw Error("barePhoto");
   expect(followupCandidate(w2, barePhoto, "999")).toBeUndefined();
   expect(a2.followupClosed).toBe(true);
+});
+
+test("approvalCardSync appends group decider status and removes buttons without duplicating footer", () => {
+  const groupCallback = updateSchema.parse({
+    update_id: 30,
+    callback_query: {
+      id: "cb-1",
+      from: {
+        id: 101,
+        is_bot: false,
+        first_name: "Stone",
+        username: "stonega",
+      },
+      data: "approve:ap-1",
+      message: {
+        message_id: 88,
+        date: 1,
+        chat: { id: -100100, type: "supergroup" },
+        text: "Save workspace instruction?\nUse Chinese in summaries.",
+      },
+    },
+  }).callback_query;
+  if (!groupCallback) throw Error("groupCallback");
+  const first = approvalCardSync(groupCallback, "approved", false);
+  expect(first).toEqual({
+    callbackText: "Proposal approved.",
+    cardEdit: {
+      chatId: -100100,
+      messageId: 88,
+      text: "Save workspace instruction?\nUse Chinese in summaries.\n\nStatus: Approved by Stone.",
+    },
+  });
+  // Idempotent when the status footer is already present.
+  if (groupCallback.message)
+    groupCallback.message.text = first.cardEdit?.text ?? "";
+  expect(approvalCardSync(groupCallback, "approved", true)).toEqual({
+    callbackText: "Proposal already approved.",
+    cardEdit: {
+      chatId: -100100,
+      messageId: 88,
+      text: "Save workspace instruction?\nUse Chinese in summaries.\n\nStatus: Approved by Stone.",
+    },
+  });
+
+  // Private chat omits redundant "by Name" suffix.
+  const privateCallback = updateSchema.parse({
+    update_id: 31,
+    callback_query: {
+      id: "cb-2",
+      from: { id: 101, is_bot: false, first_name: "Stone" },
+      data: "reject:ap-2",
+      message: {
+        message_id: 89,
+        date: 1,
+        chat: { id: 101, type: "private" },
+        text: "Save personal instruction?\nBe brief.",
+      },
+    },
+  }).callback_query;
+  if (!privateCallback) throw Error("privateCallback");
+  expect(approvalCardSync(privateCallback, "rejected", false)).toEqual({
+    callbackText: "Proposal rejected.",
+    cardEdit: {
+      chatId: 101,
+      messageId: 89,
+      text: "Save personal instruction?\nBe brief.\n\nStatus: Rejected.",
+    },
+  });
 });
 
 test("a recent forward can supply reference content while the same actor's explicit request is pending", () => {

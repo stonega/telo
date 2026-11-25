@@ -365,6 +365,11 @@ export class Executor {
             () => this.setup.client(deployment),
             typingGuard,
             signal,
+            claimed.chatId !== claimed.actor &&
+              Number.isSafeInteger(claimed.replyTo) &&
+              (claimed.replyTo ?? 0) > 0
+              ? { acknowledgeMessageId: claimed.replyTo }
+              : undefined,
           )
         : undefined;
     const draft = claimed.telegramDraft

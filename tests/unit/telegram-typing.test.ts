@@ -63,6 +63,58 @@ describe("TelegramTyping and draft fallback", () => {
     expect(attempts).toBe(1);
   });
 
+  test("sends one ephemeral 👀 reaction on slow group runs and skips fast runs", async () => {
+    const calls: { method: string; params: Record<string, unknown> }[] = [];
+    const client: Telegram = {
+      async call<T>(method: string, params = {}) {
+        calls.push({ method, params });
+        return true as T;
+      },
+    };
+    const fast = new TelegramTyping(
+      { chatId: "-100123", topicId: 0 },
+      async () => client,
+      async () => {},
+      new AbortController().signal,
+      {
+        initialDelayMs: 500,
+        intervalMs: 500,
+        acknowledgeMessageId: 42,
+        acknowledgeDelayMs: 40,
+      },
+    );
+    fast.start();
+    fast.stop();
+    await new Promise((r) => setTimeout(r, 60));
+    expect(calls).toEqual([]);
+
+    const slow = new TelegramTyping(
+      { chatId: "-100123", topicId: 0 },
+      async () => client,
+      async () => {},
+      new AbortController().signal,
+      {
+        initialDelayMs: 500,
+        intervalMs: 500,
+        acknowledgeMessageId: 42,
+        acknowledgeDelayMs: 15,
+      },
+    );
+    slow.start();
+    await new Promise((r) => setTimeout(r, 45));
+    slow.stop();
+    expect(calls).toEqual([
+      {
+        method: "setMessageReaction",
+        params: {
+          chat_id: -100123,
+          message_id: 42,
+          reaction: [{ type: "emoji", emoji: "👀" }],
+        },
+      },
+    ]);
+  });
+
   test("TelegramDraft invokes onDisabled fallback when draft transport is permanently rejected", async () => {
     let fallbackTriggered = false;
     const client: Telegram = {

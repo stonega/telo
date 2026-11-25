@@ -64,6 +64,48 @@ import { selectTaskControl, taskControl } from "./task-controls.ts";
 import { groupVisibility } from "./visibility.ts";
 import { handleWidgetQuery } from "./widgets.ts";
 
+export interface ApprovalCardEdit {
+  chatId: number;
+  messageId: number;
+  text?: string;
+}
+
+export function approvalCardSync(
+  callback: NonNullable<Update["callback_query"]>,
+  decision: "approved" | "rejected" | "revoked",
+  alreadyDecided: boolean,
+): { callbackText: string; cardEdit?: ApprovalCardEdit } {
+  const callbackText = `Proposal ${alreadyDecided ? "already " : ""}${decision}.`;
+  const message = callback.message;
+  if (!message) return { callbackText };
+  const decider =
+    [callback.from.first_name, callback.from.last_name]
+      .filter(Boolean)
+      .join(" ")
+      .trim() || (callback.from.username ? `@${callback.from.username}` : "");
+  const label =
+    decision === "approved"
+      ? "Approved"
+      : decision === "rejected"
+        ? "Rejected"
+        : "Revoked";
+  const footer = `Status: ${label}${decision !== "revoked" && decider && message.chat.type !== "private" ? ` by ${decider}` : ""}.`;
+  const baseText = message.text?.trim();
+  const text = baseText
+    ? baseText.includes("\n\nStatus: ")
+      ? baseText
+      : `${baseText.slice(0, 4096 - footer.length - 2)}\n\n${footer}`
+    : undefined;
+  return {
+    callbackText,
+    cardEdit: {
+      chatId: message.chat.id,
+      messageId: message.message_id,
+      text,
+    },
+  };
+}
+
 export class Ingress {
   private repositorySync?: RepositorySync;
   constructor(
@@ -469,6 +511,10 @@ export class Ingress {
         [d.bot?.id, update.update_id, workspace.id],
       );
       let callbackErrorText: string | undefined;
+      const callbackFeedback: {
+        callbackText?: string;
+        cardEdit?: ApprovalCardEdit;
+      } = {};
       try {
         if (workspace.deletion) return { ignored: true };
         const handled = await this.handleControl(
@@ -478,6 +524,8 @@ export class Ingress {
           d,
           verifiedAdmin,
           visibleAll,
+          undefined,
+          callbackFeedback,
         );
         if (!handled && d.active && !d.paused)
           await this.handleMessage(sql, workspace, update, d);
@@ -560,7 +608,8 @@ export class Ingress {
       await this.store.save(sql, workspace);
       return {
         accepted: true,
-        callbackText: callbackErrorText,
+        callbackText: callbackErrorText ?? callbackFeedback.callbackText,
+        cardEdit: callbackErrorText ? undefined : callbackFeedback.cardEdit,
         ephemeralText:
           callback &&
           callbackErrorText &&
@@ -588,6 +637,30 @@ export class Ingress {
           callback_query_id: update.callback_query.id,
           text: replyText,
         });
+        const cardEdit =
+          "cardEdit" in result
+            ? (result.cardEdit as ApprovalCardEdit | undefined)
+            : undefined;
+        if (cardEdit) {
+          try {
+            if (cardEdit.text) {
+              await client.call("editMessageText", {
+                chat_id: cardEdit.chatId,
+                message_id: cardEdit.messageId,
+                text: cardEdit.text,
+                reply_markup: { inline_keyboard: [] },
+              });
+            } else {
+              await client.call("editMessageReplyMarkup", {
+                chat_id: cardEdit.chatId,
+                message_id: cardEdit.messageId,
+                reply_markup: { inline_keyboard: [] },
+              });
+            }
+          } catch {
+            /* Best-effort approval card UI sync never affects the saved decision. */
+          }
+        }
         const ephemeralText =
           "ephemeralText" in result && typeof result.ephemeralText === "string"
             ? result.ephemeralText
@@ -812,6 +885,10 @@ export class Ingress {
     verifiedAdmin: boolean,
     visibleAll?: boolean,
     excludeRunId?: string,
+    callbackFeedback?: {
+      callbackText?: string;
+      cardEdit?: ApprovalCardEdit;
+    },
   ) {
     if (d.bot && (await selectDevelopment(sql, w, u, d.bot.id))) return true;
     if (d.bot && (await selectTaskControl(sql, w, u, d.bot.id))) return true;
@@ -1183,6 +1260,12 @@ export class Ingress {
         const samePrivateChat =
           callback.message?.chat.type === "private" &&
           String(callback.message.chat.id) === sender;
+        if (callbackFeedback && approval?.decision) {
+          Object.assign(
+            callbackFeedback,
+            approvalCardSync(callback, approval.decision, alreadyDecided),
+          );
+        }
         deliver(
           w,
           sender,
