@@ -447,6 +447,9 @@ export function ModelProvidersPanel({
   const [removing, setRemoving] = useState<ProviderView>();
   const [editingModel, setEditingModel] = useState(false);
   const [selection, setSelection] = useState<ModelSelection>();
+  const [followupSelection, setFollowupSelection] = useState<
+    ModelSelection | undefined
+  >();
   const [retry, setRetry] = useState(0);
   const notify = useToast();
   // biome-ignore lint/correctness/useExhaustiveDependencies: Retry explicitly reloads the saved workspace configuration.
@@ -467,6 +470,7 @@ export function ModelProvidersPanel({
           setPage(value);
           setSearchCatalog(searches);
           setSelection(value.selection ?? undefined);
+          setFollowupSelection(value.followupSelection ?? undefined);
         }
       })
       .catch((error) => {
@@ -488,6 +492,9 @@ export function ModelProvidersPanel({
       const result = await request<WorkspaceModels>(path, "PUT", {
         revision: page.revision,
         selection: selectionFromForm(selection, form),
+        ...(!onContinue
+          ? { followupSelection: followupSelection ?? null }
+          : {}),
         searchProviderId: new FormData(form).get("searchProviderId") || null,
       });
       setPage(result);
@@ -495,6 +502,7 @@ export function ModelProvidersPanel({
         current ? { ...current, version: result.version } : current,
       );
       setSelection(result.selection ?? undefined);
+      setFollowupSelection(result.followupSelection ?? undefined);
       setEditingModel(false);
       notify("Chat model saved.");
       onSaved?.();
@@ -507,6 +515,12 @@ export function ModelProvidersPanel({
   };
   const selectedProvider = page?.providers.find(
     (p) => p.id === page.selection?.providerId,
+  );
+  const followupProvider = page?.providers.find(
+    (p) => p.id === page.followupSelection?.providerId,
+  );
+  const draftFollowupProvider = page?.providers.find(
+    (p) => p.id === followupSelection?.providerId,
   );
   const modelForm = (
     <form
@@ -527,6 +541,67 @@ export function ModelProvidersPanel({
           autoFocus={!onContinue}
           disabled={busy}
         />
+        {!onContinue && (
+          <>
+            <label className="field" htmlFor="chat-followup-provider">
+              <span>Group follow-up classifier</span>
+              <Select
+                id="chat-followup-provider"
+                aria-label="Group follow-up provider"
+                value={followupSelection?.providerId ?? ""}
+                disabled={busy || !page?.providers.length}
+                onChange={(event) => {
+                  const providerId = event.target.value;
+                  if (!providerId) {
+                    setFollowupSelection(undefined);
+                    return;
+                  }
+                  const chosen = page?.providers.find(
+                    (p) => p.id === providerId,
+                  );
+                  const firstModel = chosen?.models[0];
+                  if (firstModel) {
+                    setFollowupSelection({ providerId, model: firstModel });
+                  }
+                }}
+              >
+                <option value="">Same as chat model</option>
+                {page?.providers.map((provider) => (
+                  <option key={provider.id} value={provider.id}>
+                    {provider.name}
+                  </option>
+                ))}
+              </Select>
+              <small className="muted">
+                Optional faster or lower-cost model used only to decide whether
+                an unaddressed group message is a follow-up.
+              </small>
+            </label>
+            {followupSelection && draftFollowupProvider && (
+              <label className="field" htmlFor="chat-followup-model">
+                <span>Group follow-up model</span>
+                <Select
+                  id="chat-followup-model"
+                  aria-label="Group follow-up model"
+                  value={followupSelection.model}
+                  disabled={busy}
+                  onChange={(event) =>
+                    setFollowupSelection({
+                      providerId: followupSelection.providerId,
+                      model: event.target.value,
+                    })
+                  }
+                >
+                  {draftFollowupProvider.models.map((model) => (
+                    <option key={model} value={model}>
+                      {model}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+            )}
+          </>
+        )}
         <label className="field" htmlFor="chat-search-provider">
           <span>Search provider</span>
           <Select
@@ -676,6 +751,7 @@ export function ModelProvidersPanel({
               disabled={!page || busy}
               onClick={() => {
                 setSelection(page?.selection ?? undefined);
+                setFollowupSelection(page?.followupSelection ?? undefined);
                 setFormError("");
                 setEditingModel(true);
               }}
@@ -719,6 +795,20 @@ export function ModelProvidersPanel({
                   {page ? (
                     (page.selection?.model ??
                     (page.legacy ? legacyModel : "Not selected"))
+                  ) : (
+                    <Skeleton />
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>Group follow-up</dt>
+                <dd>
+                  {page ? (
+                    page.followupSelection ? (
+                      `${followupProvider?.name ? `${followupProvider.name} · ` : ""}${page.followupSelection.model}`
+                    ) : (
+                      "Same as chat model"
+                    )
                   ) : (
                     <Skeleton />
                   )}

@@ -817,6 +817,7 @@ export interface Workspace {
   chatModel?: {
     revision: number;
     selection: ModelSelection;
+    followupSelection?: ModelSelection;
     searchProviderId?: string;
   };
   repositorySelections?: {

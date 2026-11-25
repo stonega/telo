@@ -285,6 +285,7 @@ export class Executor {
     poll.unref();
     let compacting = false;
     let classifying = false;
+    let attemptProviderId = claimed.modelProvider?.id;
     const checkpoint = async (
       message: AgentMessage,
       attemptId?: string,
@@ -594,7 +595,7 @@ export class Executor {
             r.attempts.push({
               id,
               model: meta?.model ?? r.model,
-              providerId: r.modelProvider?.id,
+              providerId: attemptProviderId ?? r.modelProvider?.id,
               ...(meta?.estimatedInputTokens !== undefined
                 ? { estimatedInputTokens: meta.estimatedInputTokens }
                 : {}),
@@ -676,19 +677,38 @@ export class Executor {
       if (claimed.followup && claimed.followup.decision !== "reply") {
         classifying = true;
         try {
+          const followupModel = extensionWorkspace.chatModel?.followupSelection
+            ? await this.setup.models.followup(extensionWorkspace)
+            : undefined;
+          const followupInput = followupModel
+            ? {
+                ...input,
+                model: selectedModel(
+                  followupModel.model,
+                  followupModel.options,
+                ),
+                apiKey: await this.setup.models.modelKey(
+                  followupModel.provider.operatorId,
+                  followupModel.provider.id,
+                  followupModel.provider.version,
+                ),
+              }
+            : input;
+          if (followupModel) attemptProviderId = followupModel.provider.id;
           const checked = await classifyFollowup(
             this.store,
             workspaceId,
             runId,
             fence,
             runner,
-            input,
+            followupInput,
           );
           Object.assign(claimed, checked);
           if (checked.followup?.decision !== "reply") return;
           if (!draft && !completed && !claimed.workflowActivation)
             typing?.start();
         } finally {
+          attemptProviderId = claimed.modelProvider?.id;
           classifying = false;
         }
       }

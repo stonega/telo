@@ -172,6 +172,7 @@ export class ModelProviders {
             !w.deletion &&
             [
               w.chatModel?.selection,
+              w.chatModel?.followupSelection,
               w.coding?.settings.authMode === "provider_key"
                 ? w.coding.settings.model
                 : undefined,
@@ -224,10 +225,12 @@ export class ModelProviders {
     requireThat(w.operatorId === admin.id && !w.deletion, "access_denied", 403);
     const d = await this.store.deployment();
     const selection = w.chatModel?.selection ?? null;
+    const followupSelection = w.chatModel?.followupSelection ?? null;
     return {
       ...(await this.catalog(admin)),
       revision: w.chatModel?.revision ?? 0,
       selection,
+      followupSelection,
       searchProviderId: w.chatModel?.searchProviderId ?? null,
       legacy: !selection && !!d.credentials.model,
       configured: !!selection || !!d.credentials.model,
@@ -239,6 +242,7 @@ export class ModelProviders {
       .object({
         revision: z.number().int().nonnegative(),
         selection: modelSelectionSchema,
+        followupSelection: modelSelectionSchema.nullable().optional(),
         searchProviderId: searchProviderIdSchema.nullable().optional(),
       })
       .strict()
@@ -257,6 +261,20 @@ export class ModelProviders {
         409,
       );
       const { provider } = await this.selected(current, input.selection);
+      const followupSelection =
+        input.followupSelection === undefined
+          ? current.chatModel?.followupSelection
+          : (input.followupSelection ?? undefined);
+      if (followupSelection) {
+        const { provider: followupProvider } = await this.selected(
+          current,
+          followupSelection,
+        );
+        selectedModel(
+          followupSelection.model,
+          providerModelOptions(followupProvider, followupSelection),
+        );
+      }
       const searchProviderId =
         input.searchProviderId === undefined
           ? current.chatModel?.searchProviderId
@@ -279,6 +297,7 @@ export class ModelProviders {
       current.chatModel = {
         revision: input.revision + 1,
         selection: input.selection,
+        ...(followupSelection ? { followupSelection } : {}),
         searchProviderId,
       };
     });
@@ -289,6 +308,29 @@ export class ModelProviders {
     const { provider, selection } = await this.selected(
       workspace,
       workspace.chatModel.selection,
+    );
+    const options = providerModelOptions(provider, selection);
+    const capabilities = modelCapabilities(selection.model, options);
+    return {
+      model: selection.model,
+      options: {
+        ...options,
+        modelLimits: capabilities?.limits,
+        providerContext: selection.modelLimits?.contextWindow === undefined,
+      },
+      provider: {
+        id: provider.id,
+        version: provider.version,
+        operatorId: provider.operatorId,
+        chatRevision: workspace.chatModel.revision,
+      },
+    };
+  }
+  async followup(workspace: Workspace) {
+    if (!workspace.chatModel?.followupSelection) return undefined;
+    const { provider, selection } = await this.selected(
+      workspace,
+      workspace.chatModel.followupSelection,
     );
     const options = providerModelOptions(provider, selection);
     const capabilities = modelCapabilities(selection.model, options);

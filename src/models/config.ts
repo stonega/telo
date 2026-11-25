@@ -48,6 +48,7 @@ export interface WorkspaceModels extends ProviderCatalog {
   searchProviderId?: string | null;
   revision: number;
   selection: ModelSelection | null;
+  followupSelection?: ModelSelection | null;
   legacy: boolean;
   configured: boolean;
 }

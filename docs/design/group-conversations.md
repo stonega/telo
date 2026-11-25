@@ -129,8 +129,9 @@ window uses answer completion time; delayed deliveries do not extend it. While a
 candidate or another answer is pending, additional plain messages do not start more
 model calls. Explicitly addressed requests continue through the normal queue.
 
-Each candidate receives one bounded tool-free Pi classification, using the configured
-model, the actor, up to six recent conversation excerpts, and the current message.
+Each candidate receives one bounded tool-free Pi classification, using the optional
+workspace group follow-up model (or the configured chat model when unset), the actor,
+up to six recent conversation excerpts, and the current message.
 Only the exact verdict `REPLY` enters normal answering. `IGNORE`, malformed output,
 uncertainty and classifier failures remain silent. The classifier is instructed to
 recognize semantic continuations across languages, not just a list of keywords.
