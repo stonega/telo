@@ -195,11 +195,23 @@ function ThreadDetailPage({
         title={data?.thread.title ?? "Thread"}
         titleBadge={data?.thread.status.replaceAll("_", " ")}
         actions={
-          error && (
-            <Action loading={loading} onClick={async () => reload()}>
-              Try again
-            </Action>
-          )
+          <>
+            {data?.thread.telegramUrl && (
+              <a
+                className="button secondary"
+                href={data.thread.telegramUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open topic in Telegram
+              </a>
+            )}
+            {error && (
+              <Action loading={loading} onClick={async () => reload()}>
+                Try again
+              </Action>
+            )}
+          </>
         }
       >
         <section

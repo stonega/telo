@@ -5,6 +5,7 @@ import { transaction } from "../../db/pool.ts";
 import { requireThat, userId } from "../../domain.ts";
 import { logQuery, readRuntimeLogs } from "../../observability/logs.ts";
 import { passwordHash } from "../../setup/credentials.ts";
+import { botSettingsSchema } from "../../setup/service.ts";
 import { audit, eligible } from "../../workspaces/policy.ts";
 import { operator } from "../auth.ts";
 import {
@@ -47,6 +48,17 @@ export function operatorRoutes(deps: AdminRouteDeps) {
       ).rows,
     });
   });
+  app.post("/api/admin/operator/bot-settings/sync", async (c) =>
+    c.json(await setup.syncBotSettings(c.get("session").admin)),
+  );
+  app.put("/api/admin/operator/bot-settings", async (c) =>
+    c.json(
+      await setup.saveBotSettings(
+        c.get("session").admin,
+        botSettingsSchema.parse(await c.req.json()),
+      ),
+    ),
+  );
   app.post("/api/admin/operator/pause", async (c) => {
     const admin = c.get("session").admin;
     operator(admin);

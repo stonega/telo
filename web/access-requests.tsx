@@ -10,6 +10,7 @@ type Requests = {
   version: number;
   items: AccessRequest[];
   requestUrl: string | null;
+  botInviteUrl?: string | null;
 };
 
 export function AccessRequests({
@@ -239,6 +240,13 @@ export function AccessRequests({
                 loading={loading}
                 copyFailureText="Could not copy the link. Select the URL to copy it."
               />
+              {data?.botInviteUrl && (
+                <ServiceUrl
+                  label="Bot owner batch invite (up to 10 contacts)"
+                  value={data.botInviteUrl}
+                  copyFailureText="Could not copy the link. Select the URL to copy it."
+                />
+              )}
             </dl>
             {loading && !data && (
               <p className="muted" role="status">

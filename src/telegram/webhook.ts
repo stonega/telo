@@ -62,6 +62,7 @@ import { repositoryMenu, selectRepository } from "./repositories.ts";
 import { command, forwardedRequest, type Update } from "./router.ts";
 import { selectTaskControl, taskControl } from "./task-controls.ts";
 import { groupVisibility } from "./visibility.ts";
+import { handleWidgetQuery } from "./widgets.ts";
 
 export class Ingress {
   private repositorySync?: RepositorySync;
@@ -253,6 +254,84 @@ export class Ingress {
         return workspaceId ? { accepted: true } : { ignored: true };
       }
       const workspace = await this.resolve(sql, update, d);
+      if (update.widget_query) {
+        const outcome = handleWidgetQuery(
+          workspace,
+          update.widget_query,
+          botId,
+        );
+        if (workspace && outcome.accepted) {
+          await sql.query(
+            "UPDATE inbox SET workspace_id=$3 WHERE bot_id=$1 AND update_id=$2",
+            [d.bot?.id, update.update_id, workspace.id],
+          );
+        }
+        return {
+          accepted: outcome.accepted,
+          widgetQueryData: outcome.data,
+        };
+      }
+      if (
+        msg?.write_access_allowed?.inviter &&
+        msg.from &&
+        !msg.from.is_bot &&
+        !msg.sender_chat &&
+        msg.chat.type === "private" &&
+        msg.chat.id === msg.from.id
+      ) {
+        if (!workspace || workspace.deletion) return { ignored: true };
+        const actor = String(msg.from.id);
+        const inviterId = String(msg.write_access_allowed.inviter.id);
+        const profile = {
+          id: actor,
+          username: msg.from.username,
+          name:
+            [msg.from.first_name, msg.from.last_name]
+              .filter(Boolean)
+              .join(" ") || undefined,
+        };
+        if (eligible(workspace, actor)) {
+          updateMemberProfile(workspace, profile);
+          if (d.active && !d.paused)
+            deliver(
+              workspace,
+              actor,
+              actor,
+              "You're connected to Telo. Tell me what you want to do, or ask for help.",
+              {
+                id: `event:${update.update_id}:botinvite`,
+                topicId: msg.message_thread_id,
+              },
+            );
+          await sql.query(
+            "UPDATE inbox SET workspace_id=$3 WHERE bot_id=$1 AND update_id=$2",
+            [botId, update.update_id, workspace.id],
+          );
+          await this.store.save(sql, workspace);
+          return { accepted: true };
+        }
+        if (eligible(workspace, inviterId, true)) {
+          try {
+            requestAccess(workspace, {
+              actor,
+              username: profile.username,
+              name: profile.name,
+              chatId: actor,
+              topicId: msg.message_thread_id,
+            });
+          } catch (error) {
+            if (!(error instanceof Fault)) throw error;
+          }
+          await sql.query(
+            "UPDATE inbox SET workspace_id=$3 WHERE bot_id=$1 AND update_id=$2",
+            [botId, update.update_id, workspace.id],
+          );
+          await this.store.save(sql, workspace);
+          await this.accessHelp(sql, update, d, workspace);
+          return { accepted: true };
+        }
+        return { ignored: true };
+      }
       const callback = update.callback_query;
       const requester = callback?.from ?? msg?.from;
       const requestChat = callback?.message?.chat ?? msg?.chat;
@@ -479,10 +558,21 @@ export class Ingress {
         if (chat) chat.title = title;
       }
       await this.store.save(sql, workspace);
-      return { accepted: true, callbackText: callbackErrorText };
+      return {
+        accepted: true,
+        callbackText: callbackErrorText,
+        ephemeralText:
+          callback &&
+          callbackErrorText &&
+          requestChat &&
+          requestChat.type !== "private"
+            ? callbackErrorText
+            : undefined,
+      };
     });
     if (update.callback_query) {
       try {
+        const client = await this.setup.client();
         const fallback = update.callback_query.data?.startsWith("google_")
           ? "accepted" in result && result.accepted
             ? ""
@@ -490,15 +580,46 @@ export class Ingress {
           : /^(?:t[rcd][cs]:|repo:)/.test(update.callback_query.data ?? "")
             ? ""
             : "Request checked. See the bot or admin panel for status.";
-        await (await this.setup.client()).call("answerCallbackQuery", {
+        const replyText =
+          "callbackText" in result
+            ? (result.callbackText ?? fallback)
+            : fallback;
+        await client.call("answerCallbackQuery", {
           callback_query_id: update.callback_query.id,
-          text:
-            "callbackText" in result
-              ? (result.callbackText ?? fallback)
-              : fallback,
+          text: replyText,
+        });
+        const ephemeralText =
+          "ephemeralText" in result && typeof result.ephemeralText === "string"
+            ? result.ephemeralText
+            : update.callback_query.message?.chat.type !== "private" &&
+                update.callback_query.data?.startsWith("request_access:") &&
+                replyText
+              ? replyText
+              : undefined;
+        if (ephemeralText) {
+          await client.call("sendMessage", {
+            text: ephemeralText,
+            ephemeral_message_parameters: {
+              callback_query_id: update.callback_query.id,
+            },
+          });
+        }
+      } catch {
+        /* Callback acknowledgements and ephemeral replies have no application effect. */
+      }
+    }
+    if (update.widget_query) {
+      try {
+        await (await this.setup.client()).call("answerWidgetQuery", {
+          widget_query_id: update.widget_query.id,
+          data:
+            "widgetQueryData" in result &&
+            typeof result.widgetQueryData === "string"
+              ? result.widgetQueryData
+              : JSON.stringify({ ok: false, error: "unauthorized" }),
         });
       } catch {
-        /* Callback acknowledgements have no application effect. */
+        /* Widget query acknowledgements have no application effect. */
       }
     }
     return result;
@@ -543,12 +664,14 @@ export class Ingress {
     d: Deployment,
   ): Promise<Workspace | undefined> {
     const message = u.message ?? u.edited_message;
-    const actor = message?.from?.id ?? u.callback_query?.from.id;
+    const actor =
+      message?.from?.id ?? u.callback_query?.from.id ?? u.widget_query?.from.id;
     const c =
       message?.chat ??
       u.my_chat_member?.chat ??
       u.chat_member?.chat ??
-      u.callback_query?.message?.chat;
+      u.callback_query?.message?.chat ??
+      u.widget_query?.chat;
     const cmd = message && d.bot ? command(message, d.bot) : undefined;
     let id: string | undefined;
     if (

@@ -20,7 +20,12 @@ export class AccessLinks {
 
   view(w: Workspace, bot?: { id: string; username: string }, now = new Date()) {
     if (!bot || w.deletion)
-      return { requestUrl: null, refreshAt: null, expiresAt: null };
+      return {
+        requestUrl: null,
+        botInviteUrl: null,
+        refreshAt: null,
+        expiresAt: null,
+      };
     const workspace = Buffer.from(w.id.replaceAll("-", ""), "hex").toString(
       "base64url",
     );
@@ -29,6 +34,7 @@ export class AccessLinks {
     const raw = `${payload}_${this.signature(payload, bot.id)}`;
     return {
       requestUrl: `https://t.me/${bot.username}?start=access_${raw}`,
+      botInviteUrl: `https://t.me/botinvite/${bot.username}`,
       refreshAt: new Date(issued * 1000 + refreshMs).toISOString(),
       expiresAt: new Date(issued * 1000 + lifetimeMs).toISOString(),
     };

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { browserPanelRun } from "../browser/privacy.ts";
 import { type Run, requireThat, type Workspace } from "../domain.ts";
+import { privateTopicUrl } from "../telegram/topic-fallback.ts";
 import { membersWithProfiles } from "../workspaces/member-profile.ts";
 import { threadMatchesRun } from "../workspaces/threads.ts";
 import { summarizeRun } from "./run-statistics.ts";
@@ -39,6 +40,7 @@ export interface ThreadSummary {
   user: TelegramUser;
   group?: { id: string; title?: string };
   topicId: number;
+  telegramUrl?: string;
   participants: TelegramUser[];
   participantCount: number;
 }
@@ -115,6 +117,7 @@ function summary(
   w: Workspace,
   group: ThreadGroup,
   profiles: ReturnType<typeof users>,
+  botUsername?: string,
 ): ThreadSummary {
   const first = group.runs[0];
   const last = group.runs.at(-1);
@@ -124,6 +127,10 @@ function summary(
     group.runs.findLast((run) => run.status === "running") ??
     group.runs.findLast((run) => run.status === "awaiting_approval") ??
     group.runs.findLast((run) => run.status === "queued");
+  const telegramUrl =
+    first.chatId === first.actor
+      ? privateTopicUrl(botUsername, first.topicId)
+      : undefined;
   return {
     id: group.id,
     kind: group.kind,
@@ -149,6 +156,7 @@ function summary(
           }
         : undefined,
     topicId: first.topicId,
+    ...(telegramUrl ? { telegramUrl } : {}),
     participants: participants
       .slice(0, 3)
       .map((id) => profiles.get(id) ?? { id }),
@@ -156,10 +164,15 @@ function summary(
   };
 }
 
-export function threadSummaries(w: Workspace, offset: number, limit: number) {
+export function threadSummaries(
+  w: Workspace,
+  offset: number,
+  limit: number,
+  botUsername?: string,
+) {
   const profiles = users(w);
   const items = [...threadGroups(w).values()].map((group) =>
-    summary(w, group, profiles),
+    summary(w, group, profiles, botUsername),
   );
   // Reverse insertion order breaks equal activity timestamps deterministically.
   items.reverse().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -176,6 +189,7 @@ export function threadDetail(
   id: string,
   offset: number,
   limit: number,
+  botUsername?: string,
 ) {
   const group = threadGroups(w).get(id);
   requireThat(group, "not_found", 404);
@@ -195,7 +209,7 @@ export function threadDetail(
     0,
   );
   return {
-    thread: summary(w, group, profiles),
+    thread: summary(w, group, profiles, botUsername),
     statistics,
     items: group.runs
       .slice(offset, offset + limit)

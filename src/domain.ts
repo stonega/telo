@@ -692,6 +692,9 @@ export interface TelegramWidget {
   height?: number;
   botId: string;
   requestMessageId?: number;
+  allowQueries?: boolean;
+  publicData?: string;
+  chatData?: string;
 }
 export interface Delivery {
   githubNotification?:
@@ -714,6 +717,11 @@ export interface Delivery {
   };
   widget?: TelegramWidget;
   widgetFallback?: boolean;
+  widgetDataEdit?: {
+    messageId: number;
+    publicData?: string;
+    chatData?: string;
+  };
   browserRequest?: { id: string; expiresAt: number; taskId?: string };
   browserResume?: { id: string; taskId?: string };
   browserRead?: BrowserReadStamp;
@@ -876,13 +884,23 @@ export interface Workspace {
     providerState: string;
   };
 }
+export interface DeploymentBot {
+  id: string;
+  username: string;
+  visibleAll: boolean;
+  activeUsernames?: string[];
+  canJoinGroups?: boolean;
+  hasTopicsEnabled?: boolean;
+  allowsUsersToCreateTopics?: boolean;
+  hasTopicSidebar?: boolean;
+}
 export interface Deployment extends ModelOptions {
   searchProviders?: SearchProvider[];
   modelProviders?: ModelProvider[];
   site?: { domain: string | null; revision: number };
   version: number;
   active: boolean;
-  bot?: { id: string; username: string; visibleAll: boolean };
+  bot?: DeploymentBot;
   model: string;
   credentials: Record<string, string>;
   webhookReady: boolean;

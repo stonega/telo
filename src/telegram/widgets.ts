@@ -8,8 +8,9 @@ import {
   type Workspace,
 } from "../domain.ts";
 import { fingerprint } from "../setup/credentials.ts";
-import { runAllowed } from "../workspaces/policy.ts";
+import { eligible, runAllowed } from "../workspaces/policy.ts";
 import { deliver } from "../workspaces/service.ts";
+import type { WidgetQuery } from "./router.ts";
 
 const argumentsSchema = z.strictObject({
   html: z.string().min(1).max(32768),
@@ -167,4 +168,109 @@ export function widgetDeliveryAllowed(
   } catch {
     return false;
   }
+}
+
+/** Queue an in-place data update for an already-sent widget (Bot API 10.4 editMessageWidgetData). */
+export function queueWidgetDataEdit(
+  w: Workspace,
+  input: {
+    id: string;
+    actor: string;
+    chatId: string;
+    topicId?: number;
+    botId: string;
+    messageId: number;
+    publicData?: string;
+    chatData?: string;
+  },
+) {
+  requireThat(
+    input.chatId === input.actor,
+    "widget_private_chat_required",
+    403,
+  );
+  requireThat(
+    input.publicData !== undefined || input.chatData !== undefined,
+    "widget_data_required",
+  );
+  if (input.publicData !== undefined)
+    requireThat(
+      Buffer.byteLength(input.publicData) <= 1024,
+      "widget_data_too_large",
+    );
+  if (input.chatData !== undefined)
+    requireThat(
+      Buffer.byteLength(input.chatData) <= 1024,
+      "widget_data_too_large",
+    );
+  const id = deliver(w, input.actor, input.chatId, "", {
+    id: input.id,
+    topicId: input.topicId,
+  });
+  const d = w.deliveries.find((entry) => entry.id === id);
+  requireThat(d, "widget_intent_missing");
+  d.botId = input.botId;
+  d.widgetDataEdit = {
+    messageId: input.messageId,
+    ...(input.publicData !== undefined ? { publicData: input.publicData } : {}),
+    ...(input.chatData !== undefined ? { chatData: input.chatData } : {}),
+  };
+  return id;
+}
+
+/** Authorize and answer a private-chat widget_query for an app-owned interactive widget. */
+export function handleWidgetQuery(
+  w: Workspace | undefined,
+  query: WidgetQuery,
+  botId: string,
+): { accepted: boolean; data: string } {
+  if (
+    !w ||
+    w.deletion ||
+    query.from.is_bot ||
+    query.chat?.type !== "private" ||
+    String(query.chat.id) !== String(query.from.id) ||
+    !query.message_id
+  )
+    return {
+      accepted: false,
+      data: JSON.stringify({ ok: false, error: "unauthorized" }),
+    };
+  const actor = String(query.from.id);
+  if (!eligible(w, actor))
+    return {
+      accepted: false,
+      data: JSON.stringify({ ok: false, error: "access_denied" }),
+    };
+  const source = w.deliveries.find(
+    (d) =>
+      d.state === "sent" &&
+      d.botId === botId &&
+      d.actor === actor &&
+      d.chatId === actor &&
+      d.remoteId === query.message_id &&
+      d.widget?.allowQueries === true,
+  );
+  if (!source)
+    return {
+      accepted: false,
+      data: JSON.stringify({ ok: false, error: "widget_not_interactive" }),
+    };
+  if (query.data === "status" && source.runId) {
+    const run = w.runs.find((r) => r.id === source.runId && r.actor === actor);
+    if (run) {
+      return {
+        accepted: true,
+        data: JSON.stringify({
+          ok: true,
+          runId: run.id,
+          status: run.status,
+        }).slice(0, 1024),
+      };
+    }
+  }
+  return {
+    accepted: true,
+    data: JSON.stringify({ ok: true, query: query.data }).slice(0, 1024),
+  };
 }

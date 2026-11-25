@@ -236,9 +236,15 @@ export function workspaceRoutes(deps: AdminRouteDeps) {
         );
       case "threads": {
         const page = historyPage.parse(c.req.query());
+        const deployment = await store.deployment();
         return c.json({
           mode: actor === w.operatorId ? "operator" : "member",
-          ...threadSummaries(w, page.offset, page.limit),
+          ...threadSummaries(
+            w,
+            page.offset,
+            page.limit,
+            deployment.bot?.username,
+          ),
         });
       }
       case "runs": {
@@ -415,10 +421,11 @@ export function workspaceRoutes(deps: AdminRouteDeps) {
     const deployment = await store.deployment();
     requireThat(deployment.bot, "bot_not_configured", 409);
     const bot = deployment.bot;
-    return c.json(
-      await change(c, (w) => issueGroupLink(w, c.get("session").admin, bot)),
-      201,
+    const link = await change(c, (w) =>
+      issueGroupLink(w, c.get("session").admin, bot),
     );
+    await setup.ensureGroupPrivacyDisabled();
+    return c.json(link, 201);
   });
   app.get("/api/admin/workspaces/:id/chats/:chat/repository", async (c) => {
     const w = await store.read(validId(c.req.param("id")));
@@ -870,9 +877,10 @@ export function workspaceRoutes(deps: AdminRouteDeps) {
     const actor = workspaceActor(w, c.get("session").admin);
     const id = threadKey.parse(c.req.param("thread"));
     const page = historyPage.parse(c.req.query());
+    const deployment = await store.deployment();
     return c.json({
       mode: actor === w.operatorId ? "operator" : "member",
-      ...threadDetail(w, id, page.offset, page.limit),
+      ...threadDetail(w, id, page.offset, page.limit, deployment.bot?.username),
     });
   });
   app.get("/api/admin/workspaces/:id/runs/:run", async (c) => {

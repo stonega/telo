@@ -86,7 +86,8 @@ export class DeliveryWorker {
       if (d.state === "sending") {
         if (Date.parse(d.startedAt ?? "") + 30000 < Date.now()) {
           // Edits and setting the same reaction can be replayed after a worker crash.
-          if (d.reaction) d.state = d.attempts >= 5 ? "failed" : "pending";
+          if (d.reaction || d.widgetDataEdit)
+            d.state = d.attempts >= 5 ? "failed" : "pending";
           else
             d.state =
               d.editOf || d.taskControlsCleanup
@@ -248,6 +249,29 @@ export class DeliveryWorker {
         });
         return;
       }
+      if (intent.widgetDataEdit) {
+        await (await this.setup.client(deployment)).call<boolean>(
+          "editMessageWidgetData",
+          {
+            chat_id: intent.chatId,
+            message_id: intent.widgetDataEdit.messageId,
+            ...(intent.widgetDataEdit.publicData !== undefined
+              ? { public_data: intent.widgetDataEdit.publicData }
+              : {}),
+            ...(intent.widgetDataEdit.chatData !== undefined
+              ? { chat_data: intent.widgetDataEdit.chatData }
+              : {}),
+          },
+        );
+        await this.finish(workspaceId, intent, (d) => {
+          d.state = "sent";
+        });
+        this.store.log.write("delivery_sent", {
+          workspaceId,
+          runId: intent.runId,
+        });
+        return;
+      }
       if (intent.widget && !intent.widgetFallback) {
         const sent = await (await this.setup.client(deployment)).call<{
           message_id: number;
@@ -258,7 +282,13 @@ export class DeliveryWorker {
           caption: intent.widget.caption,
           width: intent.widget.width,
           height: intent.widget.height,
-          allow_queries: false,
+          allow_queries: !!intent.widget.allowQueries,
+          ...(intent.widget.publicData !== undefined
+            ? { public_data: intent.widget.publicData }
+            : {}),
+          ...(intent.widget.chatData !== undefined
+            ? { chat_data: intent.widget.chatData }
+            : {}),
           is_shared: false,
           protect_content: true,
           reply_parameters: intent.replyTo
@@ -446,7 +476,10 @@ export class DeliveryWorker {
         } else if (
           error instanceof TelegramError &&
           (error.disposition === "retry" ||
-            ((intent.editOf || intent.taskControlsCleanup || intent.reaction) &&
+            ((intent.editOf ||
+              intent.taskControlsCleanup ||
+              intent.reaction ||
+              intent.widgetDataEdit) &&
               error.disposition === "unknown")) &&
           d.attempts < 5
         ) {

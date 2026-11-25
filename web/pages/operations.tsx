@@ -31,8 +31,19 @@ export function Operations() {
   const [verificationResult, setVerificationResult] = useState<unknown>();
   const [diagnostic, setDiagnostic] = useState<unknown>();
   const [editor, setEditor] = useState<
-    "account" | "verification" | "recovery" | "diagnostic"
+    "account" | "verification" | "recovery" | "diagnostic" | "botSettings"
   >();
+  const [botDraft, setBotDraft] = useState<{
+    version: number;
+    canJoinGroups: boolean;
+    visibleAll: boolean;
+    hasTopicsEnabled: boolean;
+    allowsUsersToCreateTopics: boolean;
+    hasTopicSidebar: boolean;
+  }>();
+  const [botError, setBotError] = useState("");
+  const [botSyncError, setBotSyncError] = useState("");
+  const [syncingBot, setSyncingBot] = useState(false);
   const [confirming, setConfirming] = useState<{
     paused: boolean;
     version: number;
@@ -54,7 +65,7 @@ export function Operations() {
       title="Operations"
       description="Service health and deployment controls. Operator privileges do not grant access to private conversations."
     >
-      <ErrorToast message={error || progress.error}>
+      <ErrorToast message={error || progress.error || botSyncError}>
         <button
           type="button"
           className="toast-retry"
@@ -128,6 +139,121 @@ export function Operations() {
           Pause assistant execution and run delivery across all workspaces, or
           resume when the deployment is ready.
         </p>
+      </section>
+      <section
+        className="card"
+        aria-label="Telegram bot settings"
+        aria-busy={progress.loading || syncingBot}
+      >
+        <div className="card-heading">
+          <h2>Telegram bot settings</h2>
+          <div className="row">
+            <button
+              type="button"
+              className="secondary"
+              disabled={!progress.data?.bot || syncingBot || progress.loading}
+              onClick={async () => {
+                setSyncingBot(true);
+                setBotSyncError("");
+                try {
+                  await api("/api/admin/operator/bot-settings/sync", "POST");
+                  notify("Bot settings synced from Telegram.");
+                  refresh();
+                } catch (e) {
+                  setBotSyncError((e as Error).message);
+                } finally {
+                  setSyncingBot(false);
+                }
+              }}
+            >
+              {syncingBot ? "Syncing…" : "Sync"}
+            </button>
+            <IconButton
+              icon="edit"
+              label="Edit bot settings"
+              showLabel
+              disabled={!progress.data?.bot || syncingBot || progress.loading}
+              onClick={() => {
+                const bot = progress.data?.bot;
+                if (!bot || !progress.data) return;
+                setBotError("");
+                setBotDraft({
+                  version: progress.data.version,
+                  canJoinGroups: bot.canJoinGroups ?? true,
+                  visibleAll: bot.visibleAll,
+                  hasTopicsEnabled: bot.hasTopicsEnabled ?? false,
+                  allowsUsersToCreateTopics:
+                    bot.allowsUsersToCreateTopics ?? false,
+                  hasTopicSidebar: bot.hasTopicSidebar ?? false,
+                });
+                setEditor("botSettings");
+              }}
+            />
+          </div>
+        </div>
+        {progress.data?.bot ? (
+          <dl className="plugin-summary">
+            {[
+              ["Primary username", `@${progress.data.bot.username}`],
+              [
+                "Active usernames",
+                progress.data.bot.activeUsernames?.length
+                  ? progress.data.bot.activeUsernames
+                      .map((name) => `@${name}`)
+                      .join(", ")
+                  : `@${progress.data.bot.username}`,
+              ],
+              [
+                "Group privacy mode",
+                progress.data.bot.visibleAll
+                  ? "Disabled (sees all group messages)"
+                  : "Enabled (directed messages only)",
+              ],
+              [
+                "Join groups",
+                progress.data.bot.canJoinGroups === undefined
+                  ? "Not synced"
+                  : progress.data.bot.canJoinGroups
+                    ? "Allowed"
+                    : "Disabled",
+              ],
+              [
+                "Private chat topics",
+                progress.data.bot.hasTopicsEnabled === undefined
+                  ? "Not synced"
+                  : progress.data.bot.hasTopicsEnabled
+                    ? "Enabled"
+                    : "Disabled",
+              ],
+              [
+                "Topic sidebar",
+                progress.data.bot.hasTopicSidebar === undefined
+                  ? "Not synced"
+                  : progress.data.bot.hasTopicSidebar
+                    ? "Shown"
+                    : "Hidden",
+              ],
+            ].map(([label, value]) => (
+              <div key={label}>
+                <dt>{label}</dt>
+                <dd>{value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : progress.loading ? (
+          <dl className="plugin-summary">
+            <div>
+              <dt>Primary username</dt>
+              <dd>
+                <Skeleton width="8em" />
+              </dd>
+            </div>
+          </dl>
+        ) : (
+          <p className="muted">
+            Connect a Telegram bot in Setup to manage its Telegram settings.
+          </p>
+        )}
       </section>
       <section className="card" aria-label="Run diagnostics">
         <div className="card-heading">
@@ -382,6 +508,96 @@ export function Operations() {
               refresh();
             }}
           />
+        </Modal>
+      )}
+      {editor === "botSettings" && botDraft && (
+        <Modal title="Telegram bot settings" onClose={closeEditor}>
+          <p className="muted">
+            Updates are applied directly through Telegram&apos;s Bot API
+            (setMySettings) without changing callback query mode.
+          </p>
+          <label className="member-toggle-row">
+            <input
+              type="checkbox"
+              checked={botDraft.canJoinGroups}
+              onChange={(e) =>
+                setBotDraft({ ...botDraft, canJoinGroups: e.target.checked })
+              }
+            />
+            <span>Allow adding bot to groups</span>
+          </label>
+          <label className="member-toggle-row">
+            <input
+              type="checkbox"
+              checked={botDraft.visibleAll}
+              onChange={(e) =>
+                setBotDraft({ ...botDraft, visibleAll: e.target.checked })
+              }
+            />
+            <span>Disable group privacy mode (see all group messages)</span>
+          </label>
+          <label className="member-toggle-row">
+            <input
+              type="checkbox"
+              checked={botDraft.hasTopicsEnabled}
+              onChange={(e) =>
+                setBotDraft({
+                  ...botDraft,
+                  hasTopicsEnabled: e.target.checked,
+                  allowsUsersToCreateTopics: e.target.checked
+                    ? botDraft.allowsUsersToCreateTopics
+                    : false,
+                  hasTopicSidebar: e.target.checked
+                    ? botDraft.hasTopicSidebar
+                    : false,
+                })
+              }
+            />
+            <span>Enable topics in private chats</span>
+          </label>
+          <label className="member-toggle-row">
+            <input
+              type="checkbox"
+              disabled={!botDraft.hasTopicsEnabled}
+              checked={botDraft.allowsUsersToCreateTopics}
+              onChange={(e) =>
+                setBotDraft({
+                  ...botDraft,
+                  allowsUsersToCreateTopics: e.target.checked,
+                })
+              }
+            />
+            <span>Allow users to create and delete private topics</span>
+          </label>
+          <label className="member-toggle-row">
+            <input
+              type="checkbox"
+              disabled={!botDraft.hasTopicsEnabled}
+              checked={botDraft.hasTopicSidebar}
+              onChange={(e) =>
+                setBotDraft({
+                  ...botDraft,
+                  hasTopicSidebar: e.target.checked,
+                })
+              }
+            />
+            <span>Show private topics in a sidebar</span>
+          </label>
+          {botError && <Notice error>{botError}</Notice>}
+          <ModalActions>
+            <Action
+              onError={setBotError}
+              onClick={async () => {
+                setBotError("");
+                await api("/api/admin/operator/bot-settings", "PUT", botDraft);
+                closeEditor();
+                notify("Telegram bot settings updated.");
+                refresh();
+              }}
+            >
+              Save settings
+            </Action>
+          </ModalActions>
         </Modal>
       )}
       {editor === "diagnostic" && (

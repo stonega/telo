@@ -20,6 +20,7 @@ type RichBlock =
   | { type: "pre"; text: string; language?: string }
   | { type: "divider" }
   | { type: "blockquote"; blocks: RichBlock[] }
+  | { type: "expandable_blockquote"; blocks: RichBlock[] }
   | {
       type: "list";
       items: {
@@ -114,12 +115,17 @@ export function telegramRichMessage(markdown: string) {
         case "hr":
           result.push({ type: "divider" });
           break;
-        case "blockquote":
+        case "blockquote": {
+          const nested = blocks(token.tokens ?? [], depth + 1);
+          const rawText = token.raw ?? "";
+          const expandable =
+            rawText.length > 400 || rawText.split("\n").length > 6;
           result.push({
-            type: "blockquote",
-            blocks: blocks(token.tokens ?? [], depth + 1),
+            type: expandable ? "expandable_blockquote" : "blockquote",
+            blocks: nested,
           });
           break;
+        }
         case "list": {
           const list = token as Tokens.List;
           result.push({

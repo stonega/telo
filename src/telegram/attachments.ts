@@ -20,11 +20,15 @@ const MAX_RUN_ATTACHMENTS = 4;
 export const audioMessageRequest = "Respond to the current spoken message.";
 
 export function messageText(message: Message) {
-  const text = referenceText(message);
+  const parts = [referenceText(message)];
+  if (message.quote?.text)
+    parts.push(`Quoted excerpt (untrusted):\n${message.quote.text}`);
   const reply = message.reply_to_message;
-  return reply?.forward_origin
-    ? `${text}\n\nReplied-to forwarded reference (message ${reply.message_id}):\n${referenceText(reply)}`
-    : text;
+  if (reply?.forward_origin)
+    parts.push(
+      `Replied-to forwarded reference (message ${reply.message_id}):\n${referenceText(reply)}`,
+    );
+  return parts.join("\n\n");
 }
 
 function referenceText(

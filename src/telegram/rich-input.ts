@@ -48,12 +48,11 @@ function richContent(value: unknown) {
         case "paragraph":
         case "heading":
         case "footer":
+          inline(item.text, depth + 1, controls);
+          break;
         case "expandable_blockquote":
-          inline(
-            item.text,
-            depth + 1,
-            controls && item.type !== "expandable_blockquote",
-          );
+          if (Array.isArray(item.blocks)) blocks(item.blocks, depth + 1, false);
+          else inline(item.text, depth + 1, false);
           break;
         case "pre":
           inline(item.text, depth + 1, false);
@@ -91,6 +90,28 @@ function richContent(value: unknown) {
   return { text: text.trimEnd(), entities };
 }
 
+function quoteContent(value: unknown) {
+  const quote = record(value);
+  if (!quote) return undefined;
+  let text = typeof quote.text === "string" ? quote.text : "";
+  if (!text.trim() && Array.isArray(quote.rich_texts)) {
+    const parts: string[] = [];
+    for (const entry of quote.rich_texts) {
+      const part = richContent({
+        blocks: [{ type: "paragraph", text: entry }],
+      }).text;
+      if (part) parts.push(part);
+    }
+    text = parts.join("\n");
+  }
+  const bounded = text.slice(0, 4096).trim();
+  if (!bounded) return undefined;
+  return {
+    text: bounded,
+    ...(quote.is_manual === true ? { is_manual: true } : {}),
+  };
+}
+
 function message(value: unknown, depth = 0): unknown {
   const input = record(value);
   if (!input || depth > 1) return value;
@@ -101,6 +122,7 @@ function message(value: unknown, depth = 0): unknown {
     input.rich_message !== undefined
   )
     Object.assign(normalized, richContent(input.rich_message));
+  if (input.quote !== undefined) normalized.quote = quoteContent(input.quote);
   if (input.reply_to_message)
     normalized.reply_to_message = message(input.reply_to_message, depth + 1);
   return normalized;

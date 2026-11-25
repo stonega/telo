@@ -153,9 +153,12 @@ for (const width of [1280, 390]) {
       exact: true,
     });
     const timer = requests.getByRole("timer", { name: "Invite link refresh" });
-    const heading = requests.locator(".service-url dt");
+    const heading = requests.locator(".service-url dt").first();
     const progress = timer.locator(".access-link-timer-progress");
-    const link = requests.locator(".service-url code");
+    const link = requests.locator(".service-url code").first();
+    await expect(
+      requests.getByText("https://t.me/botinvite/fixture_bot"),
+    ).toBeVisible();
     await expectInviteSpacing(page);
     await expect(timer).toHaveText("New link in 10s");
     await expect(timer.locator("svg")).toBeVisible();
@@ -300,7 +303,7 @@ for (const width of [1280, 390]) {
       exact: true,
     });
     const timer = requests.getByRole("timer");
-    const link = requests.locator(".service-url code");
+    const link = requests.locator(".service-url code").first();
     await expect(timer).toHaveText("New link in 10s");
     const first = await link.textContent();
     const initialCalls = f.calls();
@@ -416,7 +419,7 @@ for (const width of [1280, 390]) {
     await f.ready();
     const timer = page.getByRole("timer", { name: "Invite link refresh" });
     const progress = timer.locator(".access-link-timer-progress");
-    const link = page.locator(".service-url code");
+    const link = page.locator(".service-url code").first();
     await expect(timer).toHaveText("New link in 10s");
     await expect(progress).toHaveCSS("transition-duration", "0s");
     await expectInviteSpacing(page);

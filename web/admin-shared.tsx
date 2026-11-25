@@ -12,7 +12,7 @@ import type {
   ModelOptions,
   ThinkingLevel,
 } from "../src/agent/model-settings.ts";
-import type { Settings } from "../src/domain.ts";
+import type { DeploymentBot, Settings } from "../src/domain.ts";
 import { type ActionIcon, IconButton } from "./icon-button.tsx";
 import { ModalPending } from "./modal.tsx";
 import { Pagination } from "./pagination.tsx";
@@ -340,7 +340,7 @@ export function Page({
 export interface Progress {
   version: number;
   active: boolean;
-  bot?: { id: string; username: string; visibleAll: boolean };
+  bot?: DeploymentBot;
   model: string;
   modelBaseUrl: string;
   thinkingLevel: ThinkingLevel;

@@ -12,12 +12,18 @@ export interface BotIdentity {
   id: number;
   username: string;
   is_bot: boolean;
+  active_usernames?: string[];
+  can_join_groups?: boolean;
   can_read_all_group_messages?: boolean;
+  has_topics_enabled?: boolean;
+  allows_users_to_create_topics?: boolean;
+  has_topic_sidebar?: boolean;
 }
 export const ALLOWED_UPDATES = [
   "message",
   "edited_message",
   "callback_query",
+  "widget_query",
   "my_chat_member",
   "chat_member",
   "stopped_message_generation",

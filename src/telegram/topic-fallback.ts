@@ -63,6 +63,7 @@ export function privateTopicFallback(
     ![`run:${run.id}:result`, `run:${run.id}:failure`].includes(d.id) ||
     d.buttons?.length ||
     d.widget ||
+    d.widgetDataEdit ||
     d.reaction ||
     d.editOf ||
     d.progressMessage ||
@@ -82,4 +83,13 @@ export function privateTopicFallback(
 
 export function privateTopicFallbackText(text: string) {
   return `Telegram couldn't reply in your Topic, so I'm replying here.\n\n${text}`;
+}
+
+/** Direct deep link to a private-chat topic (Bot API 10.4); opens only for the topic owner. */
+export function privateTopicUrl(
+  botUsername: string | undefined,
+  topicId: number | undefined,
+) {
+  if (!botUsername || !topicId || topicId <= 0) return undefined;
+  return `https://t.me/${botUsername}/${topicId}`;
 }

@@ -39,6 +39,45 @@ import { audit, revokeWork } from "../workspaces/policy.ts";
 import { newWorkspace } from "../workspaces/service.ts";
 import { decrypt, encrypt, hash, token } from "./credentials.ts";
 
+function botSnapshot(identity: BotIdentity): NonNullable<Deployment["bot"]> {
+  const activeUsernames = Array.from(
+    new Set(
+      (identity.active_usernames ?? [])
+        .map((name) => name.trim())
+        .filter(Boolean),
+    ),
+  );
+  return {
+    id: String(identity.id),
+    username: identity.username,
+    visibleAll: !!identity.can_read_all_group_messages,
+    ...(activeUsernames.length ? { activeUsernames } : {}),
+    ...(identity.can_join_groups !== undefined
+      ? { canJoinGroups: identity.can_join_groups }
+      : {}),
+    ...(identity.has_topics_enabled !== undefined
+      ? { hasTopicsEnabled: identity.has_topics_enabled }
+      : {}),
+    ...(identity.allows_users_to_create_topics !== undefined
+      ? { allowsUsersToCreateTopics: identity.allows_users_to_create_topics }
+      : {}),
+    ...(identity.has_topic_sidebar !== undefined
+      ? { hasTopicSidebar: identity.has_topic_sidebar }
+      : {}),
+  };
+}
+
+export const botSettingsSchema = z
+  .object({
+    version: z.number().int().positive(),
+    canJoinGroups: z.boolean().optional(),
+    visibleAll: z.boolean().optional(),
+    hasTopicsEnabled: z.boolean().optional(),
+    allowsUsersToCreateTopics: z.boolean().optional(),
+    hasTopicSidebar: z.boolean().optional(),
+  })
+  .strict();
+
 function activationModelReady(d: Deployment, w: Workspace) {
   try {
     if (w.chatModel) {
@@ -153,10 +192,27 @@ export class SetupService {
     input = credentialsSchema.parse(input);
     let identity: BotIdentity | undefined;
     if (input.botToken) {
-      identity = await this.transport(input.botToken).call<BotIdentity>(
-        "getMe",
-      );
+      const botClient = this.transport(input.botToken);
+      identity = await botClient.call<BotIdentity>("getMe");
       requireThat(identity.is_bot && identity.username, "invalid_bot");
+      if (!identity.can_read_all_group_messages) {
+        try {
+          const updated = await botClient.call<boolean>("setMySettings", {
+            can_join_groups: true,
+            can_read_all_group_messages: true,
+            callback_query_mode: "default",
+          });
+          if (updated === true) {
+            identity = {
+              ...identity,
+              can_join_groups: true,
+              can_read_all_group_messages: true,
+            };
+          }
+        } catch {
+          /* Best-effort: never block bot credential setup if Telegram rejects setMySettings. */
+        }
+      }
     }
     await transaction(this.store.pool, async (sql) => {
       const d = await this.store.deployment(sql, true);
@@ -196,11 +252,7 @@ export class SetupService {
           "bot_identity_change_requires_new_deployment",
           409,
         );
-        d.bot = {
-          id: String(identity.id),
-          username: identity.username,
-          visibleAll: !!identity.can_read_all_group_messages,
-        };
+        d.bot = botSnapshot(identity);
         d.credentials.bot = encrypt(this.key, "bot", input.botToken);
         d.webhookReady = false;
         d.active = false;
@@ -499,6 +551,102 @@ export class SetupService {
       await this.store.saveDeployment(sql, d);
       await sql.query(
         "INSERT INTO operator_audit(actor,action,target) VALUES($1,'deployment.activated','deployment')",
+        [admin.id],
+      );
+    });
+    return this.progress(admin);
+  }
+  /** Best-effort: disable group privacy mode via Bot API 10.5 so new groups receive @mentions. */
+  async ensureGroupPrivacyDisabled() {
+    const d = await this.store.deployment();
+    if (!d.bot || d.bot.visibleAll || !d.credentials.bot) return false;
+    try {
+      const client = await this.client(d);
+      const updated = await client.call<boolean>("setMySettings", {
+        can_join_groups: true,
+        can_read_all_group_messages: true,
+        callback_query_mode: "default",
+      });
+      if (updated !== true) return false;
+      const botId = d.bot.id;
+      await transaction(this.store.pool, async (sql) => {
+        const current = await this.store.deployment(sql, true);
+        if (!current.bot || current.bot.id !== botId || current.bot.visibleAll)
+          return;
+        current.bot.visibleAll = true;
+        current.bot.canJoinGroups = true;
+        current.version++;
+        await this.store.saveDeployment(sql, current);
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  async syncBotSettings(admin: Admin) {
+    operator(admin);
+    const d = await this.store.deployment();
+    requireThat(d.bot && d.credentials.bot, "bot_not_configured", 409);
+    const client = await this.client(d);
+    const identity = await client.call<BotIdentity>("getMe");
+    requireThat(
+      identity.is_bot && identity.username && String(identity.id) === d.bot.id,
+      "invalid_bot",
+      502,
+    );
+    await transaction(this.store.pool, async (sql) => {
+      const current = await this.store.deployment(sql, true);
+      requireThat(
+        current.bot?.id === String(identity.id),
+        "version_conflict",
+        409,
+      );
+      current.bot = botSnapshot(identity);
+      current.version++;
+      await this.store.saveDeployment(sql, current);
+      await sql.query(
+        "INSERT INTO operator_audit(actor,action,target) VALUES($1,'bot.settings_synced','deployment')",
+        [admin.id],
+      );
+    });
+    return this.progress(admin);
+  }
+  async saveBotSettings(admin: Admin, raw: z.infer<typeof botSettingsSchema>) {
+    operator(admin);
+    const input = botSettingsSchema.parse(raw);
+    const d = await this.store.deployment();
+    requireThat(d.bot && d.credentials.bot, "bot_not_configured", 409);
+    requireThat(d.version === input.version, "version_conflict", 409);
+    const params: Record<string, unknown> = {
+      // Keep default callback_query_mode so callback_query.message remains available for authorization.
+      callback_query_mode: "default",
+    };
+    if (input.canJoinGroups !== undefined)
+      params.can_join_groups = input.canJoinGroups;
+    if (input.visibleAll !== undefined)
+      params.can_read_all_group_messages = input.visibleAll;
+    if (input.hasTopicsEnabled !== undefined)
+      params.has_topics_enabled = input.hasTopicsEnabled;
+    if (input.allowsUsersToCreateTopics !== undefined)
+      params.allows_users_to_create_topics = input.allowsUsersToCreateTopics;
+    if (input.hasTopicSidebar !== undefined)
+      params.has_topic_sidebar = input.hasTopicSidebar;
+    const client = await this.client(d);
+    await client.call<boolean>("setMySettings", params);
+    const identity = await client.call<BotIdentity>("getMe");
+    requireThat(
+      identity.is_bot && identity.username && String(identity.id) === d.bot.id,
+      "invalid_bot",
+      502,
+    );
+    await transaction(this.store.pool, async (sql) => {
+      const current = await this.store.deployment(sql, true);
+      requireThat(current.version === input.version, "version_conflict", 409);
+      current.bot = botSnapshot(identity);
+      current.version++;
+      await this.store.saveDeployment(sql, current);
+      await sql.query(
+        "INSERT INTO operator_audit(actor,action,target) VALUES($1,'bot.settings_updated','deployment')",
         [admin.id],
       );
     });
