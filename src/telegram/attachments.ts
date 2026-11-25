@@ -19,7 +19,32 @@ const MAX_RUN_BYTES = 10 * 1024 * 1024;
 const MAX_RUN_ATTACHMENTS = 4;
 export const audioMessageRequest = "Respond to the current spoken message.";
 
-export function messageText(message: Message) {
+function replyAuthorLabel(user?: Message["from"]) {
+  if (!user) return "";
+  const name = [user.first_name, user.last_name]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  const handle = user.username ? `@${user.username}` : "";
+  const display = [name, handle].filter(Boolean).join(" ");
+  return display ? `, author ${user.id} (${display})` : `, author ${user.id}`;
+}
+
+function isGroupReplyReference(
+  message: Pick<Message, "reply_to_message"> & {
+    chat?: Pick<Message["chat"], "type">;
+  },
+  botId?: string,
+) {
+  const reply = message.reply_to_message;
+  if (!reply || reply.forward_origin) return false;
+  if (!message.chat || !["group", "supergroup"].includes(message.chat.type))
+    return false;
+  if (botId && String(reply.from?.id) === botId) return false;
+  return true;
+}
+
+export function messageText(message: Message, botId?: string) {
   const parts = [referenceText(message)];
   if (message.quote?.text)
     parts.push(`Quoted excerpt (untrusted):\n${message.quote.text}`);
@@ -28,6 +53,13 @@ export function messageText(message: Message) {
     parts.push(
       `Replied-to forwarded reference (message ${reply.message_id}):\n${referenceText(reply)}`,
     );
+  else if (reply && isGroupReplyReference(message, botId)) {
+    const replyBody = referenceText(reply).trim();
+    if (replyBody)
+      parts.push(
+        `Replied-to message (message ${reply.message_id}${replyAuthorLabel(reply.from)}, untrusted reference):\n${replyBody}`,
+      );
+  }
   return parts.join("\n\n");
 }
 
@@ -50,12 +82,13 @@ export function messageAttachments(
     | "voice"
     | "animation"
     | "reply_to_message"
-  >,
+  > & { chat?: Pick<Message["chat"], "type"> },
   botId: string,
 ): Attachment[] {
   const attachments = contentAttachments(message, botId);
-  if (message.reply_to_message?.forward_origin)
-    attachments.push(...contentAttachments(message.reply_to_message, botId));
+  const reply = message.reply_to_message;
+  if (reply && (reply.forward_origin || isGroupReplyReference(message, botId)))
+    attachments.push(...contentAttachments(reply, botId));
   return attachments;
 }
 

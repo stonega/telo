@@ -68,9 +68,9 @@ binding before new work. Existing scheduled reports keep their own approved scop
 
 - `/ask@your_bot 请总结本话题的结论`
 - `@your_bot 这个 PR 的主要变化是什么？`
-- Reply 一条机器人消息继续讨论。
+- Reply 一条机器人消息继续讨论，或 Reply 群友的消息并 `@your_bot` 让机器人结合该消息正文与附件作答（原消息仅作为参考内容，不会赋予原发送者工作区权限）。
 
-将 `your_bot` 替换为实际用户名。Telegram 隐私模式可能导致普通 @提及无法送达；优先使用带机器人用户名的命令或 Reply。
+将 `your_bot` 替换为实际用户名。Telegram 隐私模式可能导致普通 @提及无法送达；优先使用带机器人用户名的命令或 Reply。群内交互式回答默认会直接 Reply 触发消息，方便在活跃群聊中区分对象。
 
 ### Enable direct @mentions without making the bot an administrator
 
@@ -104,7 +104,7 @@ Discussions stay within the current group and Topic. Unbound groups keep persona
 repository choices per Topic; repository-bound groups share one target across all
 Topics. Replying to a retained bot answer joins that public discussion.
 
-明确提问得到回答后，在 Telegram 能送达普通消息的前提下，同一成员可在约五分钟内用“再详细点”“换成英文”等清楚追问继续，无需重新 @。其他成员发言不会接管你的讨论。指向别人或无关的消息会结束自动关注。
+明确提问得到回答后，在 Telegram 能送达普通消息的前提下，同一成员可在约五分钟内用“再详细点”“换成英文”等清楚追问继续（也支持附带简短说明文字的截图/文件追问），无需重新 @。其他成员发言不会接管你的讨论。指向别人或无关的消息会结束自动关注。
 
 答案还在生成时、`/recap` 之后、超过窗口或机器人无法判断对象时，重新显式提问或 Reply。群组回答只发送最终结果，不显示私聊式实时预览。
 
@@ -128,7 +128,8 @@ Saving still follows your workspace permissions and any required approvals.
 Linking or relinking a group enables received-message collection by default.
 The link dialog explains this before you send the command, and Telo records
 the verified group administrator and time. Collected messages can include people
-who are not workspace members and can be used for group context and recaps.
+who are not workspace members and can be used for group context, interactive history
+lookups in the same group/Topic, and recaps.
 Let group members know the purpose and retention period.
 
 Telegram must deliver the messages first. Disable privacy mode and re-add the bot,

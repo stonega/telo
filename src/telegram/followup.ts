@@ -64,14 +64,15 @@ export function followupCandidate(
       transcript: [],
     };
   }
-  const text = msg.text?.trim();
+  const text = (msg.text ?? msg.caption)?.trim();
+  const spans = msg.text !== undefined ? msg.entities : msg.caption_entities;
   if (
     !text ||
     text.length > 500 ||
     msg.reply_to_message ||
     text.startsWith("/") ||
     /@[\p{L}\p{N}_]+/u.test(text) ||
-    msg.entities?.some((e) =>
+    spans?.some((e) =>
       ["mention", "text_mention", "bot_command"].includes(e.type),
     )
   ) {

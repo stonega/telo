@@ -71,8 +71,76 @@ test("forwards and explicitly replied-to forwards preserve reference text, origi
     text: "unforwarded reply reference",
     document: forwarded.document,
   };
-  expect(messageText(reply)).toBe("save this");
+  expect(messageText(reply, bot.id)).toBe("save this");
   expect(messageAttachments(reply, bot.id)).toEqual([]);
+});
+
+test("group replies to another member include untrusted reference text and media, skipping bot and empty service replies", () => {
+  const teammateMessage = {
+    message_id: 77,
+    from: {
+      id: 202,
+      is_bot: false,
+      first_name: "Alice",
+      last_name: "Chen",
+      username: "alice",
+    },
+    caption: "TypeError: cannot read property 'id' of undefined",
+    photo: [{ file_id: "err-photo", width: 800, height: 600 }],
+  };
+  const groupReply = updateSchema.parse({
+    update_id: 10,
+    message: {
+      ...message,
+      chat: { id: -100100, type: "supergroup" },
+      text: "@test_bot explain this error",
+      reply_to_message: teammateMessage,
+    },
+  }).message;
+  if (!groupReply) throw Error("groupReply");
+  expect(messageText(groupReply, bot.id)).toBe(
+    "@test_bot explain this error\n\nReplied-to message (message 77, author 202 (Alice Chen @alice), untrusted reference):\nTypeError: cannot read property 'id' of undefined",
+  );
+  expect(messageAttachments(groupReply, bot.id)).toMatchObject([
+    { botId: bot.id, fileId: "err-photo", kind: "photo" },
+  ]);
+
+  // Replying to the bot's own message does not duplicate its text or attachments.
+  const botReply = updateSchema.parse({
+    update_id: 11,
+    message: {
+      ...message,
+      chat: { id: -100100, type: "supergroup" },
+      text: "follow up",
+      reply_to_message: {
+        message_id: 78,
+        from: { id: 999, is_bot: true, username: "test_bot" },
+        text: "previous bot answer",
+        document: { file_id: "bot-file", file_name: "out.txt" },
+      },
+    },
+  }).message;
+  if (!botReply) throw Error("botReply");
+  expect(messageText(botReply, bot.id)).toBe("follow up");
+  expect(messageAttachments(botReply, bot.id)).toEqual([]);
+
+  // Forum topic root service messages have no text or media and add no noise.
+  const topicServiceReply = updateSchema.parse({
+    update_id: 12,
+    message: {
+      ...message,
+      chat: { id: -100100, type: "supergroup" },
+      message_thread_id: 50,
+      text: "@test_bot hi",
+      reply_to_message: {
+        message_id: 50,
+        from: { id: 202, is_bot: false, first_name: "Alice" },
+      },
+    },
+  }).message;
+  if (!topicServiceReply) throw Error("topicServiceReply");
+  expect(messageText(topicServiceReply, bot.id)).toBe("@test_bot hi");
+  expect(messageAttachments(topicServiceReply, bot.id)).toEqual([]);
 });
 
 // A local, selectable-text PDF; no downloads or parser mocks.

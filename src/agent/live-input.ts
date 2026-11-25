@@ -104,7 +104,11 @@ export function liveMessage(
   };
 }
 
-/** Native reply context is opt-in through an explicit, authorized source citation. */
+/**
+ * Native reply context: explicit authorized source citations take precedence.
+ * Interactive group answers default to the triggering message so replies stay
+ * anchored in busy chats, while private chats remain unquoted unless cited.
+ */
 export function answerReference(run: Run, text: string, botId?: string) {
   if (run.workflowId) return;
   for (const match of text.matchAll(/\[source:([^\]]+)\]/g)) {
@@ -125,4 +129,11 @@ export function answerReference(run: Run, text: string, botId?: string) {
     )
       return messageId;
   }
+  if (
+    run.chatId !== run.actor &&
+    run.triggerKind !== "mission_wakeup" &&
+    Number.isSafeInteger(run.replyTo) &&
+    (run.replyTo ?? 0) > 0
+  )
+    return run.replyTo;
 }

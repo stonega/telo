@@ -81,18 +81,30 @@ export async function classifyFollowup(
                     text: s.text.slice(0, 4000),
                   }))
               : undefined,
-          message:
-            gate.kind === "forward"
-              ? run.sources
-                  .filter((s) => s.runId === run.id)
-                  .map((s) => ({
-                    text: s.text.slice(0, 4000),
-                    attachments: s.attachments?.map((a) => ({
-                      kind: a.kind,
-                      name: a.name,
-                    })),
-                  }))
-              : run.task,
+          message: (() => {
+            if (gate.kind === "forward") {
+              return run.sources
+                .filter((s) => s.runId === run.id)
+                .map((s) => ({
+                  text: s.text.slice(0, 4000),
+                  attachments: s.attachments?.map((a) => ({
+                    kind: a.kind,
+                    name: a.name,
+                  })),
+                }));
+            }
+            const attachments = run.sources
+              .filter((s) => s.runId === run.id)
+              .flatMap((s) =>
+                (s.attachments ?? []).map((a) => ({
+                  kind: a.kind,
+                  name: a.name,
+                })),
+              );
+            return attachments.length
+              ? { text: run.task, attachments }
+              : run.task;
+          })(),
         }),
         transcript: [],
         tools: [],

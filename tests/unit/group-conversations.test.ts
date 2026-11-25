@@ -167,6 +167,49 @@ test("shared group discussion records and growing cache prefix survive participa
   ]);
 });
 
+test("group context includes speaker display names for participating members without breaking cache prefix", () => {
+  const w = workspace();
+  const m1 = w.members.find((m) => m.id === "101");
+  const m2 = w.members.find((m) => m.id === "202");
+  if (m1) {
+    m1.name = "Stone";
+    m1.username = "stonega";
+    m1.profileUpdatedAt = new Date().toISOString();
+  }
+  if (m2) {
+    m2.name = "Alice";
+    m2.username = "alice";
+    m2.profileUpdatedAt = new Date().toISOString();
+  }
+  w.members.push({
+    id: "303",
+    role: "member",
+    active: true,
+    name: "Unrelated",
+    username: "unrelated",
+    profileUpdatedAt: new Date().toISOString(),
+  });
+  const a = ask(w, "101", "部署方案");
+  const first = buildContext(w, a);
+  expect(first.metadata.speakers).toEqual({
+    "101": { name: "Stone", username: "stonega" },
+  });
+  answer(w, a, 100);
+  const b = ask(w, "202", "加上回滚", 0, 100);
+  const second = buildContext(w, b);
+  expect(second.system).toBe(first.system);
+  expect(second.metadata.speakers).toEqual({
+    "101": { name: "Stone", username: "stonega" },
+    "202": { name: "Alice", username: "alice" },
+  });
+  expect(second.prompt).toContain('"speakers"');
+  expect(second.prompt).not.toContain("Unrelated");
+  const priv = createRun(w, "101", "private hi", "101", 0, "gpt-4.1-mini", {
+    botId: "999",
+  });
+  expect(buildContext(w, priv).metadata.speakers).toBeUndefined();
+});
+
 test("group history compacts and source edits invalidate frozen memory", () => {
   const w = workspace();
   for (let i = 0; i < 18; i++)
@@ -215,6 +258,117 @@ test("natural follow-up requires this actor's recent confirmed answer in this bo
   const d = w.deliveries[0];
   if (d) d.state = "delivery_unknown";
   expect(followupCandidate(w, message(), "999")).toBeUndefined();
+});
+
+test("queryChatHistory includes collected ambient group messages in the same group/topic when collection is enabled", () => {
+  const w = workspace();
+  const chat = w.chats.find((c) => c.id === "-100100");
+  if (chat) chat.collection = true;
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 86400000).toISOString();
+  w.messages.push(
+    {
+      id: "-100100:501",
+      chatId: "-100100",
+      topicId: 0,
+      author: "303",
+      text: "大家觉得新部署方案要加灰度吗？",
+      at: now.toISOString(),
+      expiresAt,
+      directed: false,
+    },
+    {
+      id: "-100100:502",
+      chatId: "-100100",
+      topicId: 20,
+      author: "303",
+      text: "另一个话题的灰度讨论",
+      at: now.toISOString(),
+      expiresAt,
+      directed: false,
+    },
+  );
+  const run = ask(w, "101", "整理刚才的讨论");
+  const found = queryChatHistory(w, run, { query: "灰度" });
+  expect(found.messages.map((m) => m.id)).toEqual(["-100100:501"]);
+  expect(found.messages[0]).toMatchObject({
+    ambient: true,
+    telegramMessageId: 501,
+  });
+  // Opting out of ambient messages or specifying a threadId restricts to threaded history.
+  expect(
+    queryChatHistory(w, run, { query: "灰度", includeGroupMessages: false })
+      .messages,
+  ).toEqual([]);
+  expect(
+    queryChatHistory(w, run, { query: "灰度", threadId: run.threadId })
+      .messages,
+  ).toEqual([]);
+  // Private chats never see collected group messages.
+  const priv = createRun(w, "101", "private lookup", "101", 0, "gpt-4.1-mini", {
+    botId: "999",
+  });
+  expect(queryChatHistory(w, priv, { query: "灰度" }).messages).toEqual([]);
+  // Turning off group collection stops returning ambient messages.
+  if (chat) chat.collection = false;
+  expect(queryChatHistory(w, run, { query: "灰度" }).messages).toEqual([]);
+});
+
+test("natural follow-up accepts captioned media and closes attention on bare media or teammate mentions in captions", () => {
+  const w = workspace();
+  const a = ask(w);
+  answer(w, a);
+  const captionedPhoto = updateSchema.parse({
+    update_id: 20,
+    message: {
+      message_id: 30,
+      date: Math.floor(Date.now() / 1000),
+      from: { id: 101, is_bot: false },
+      chat: { id: -100100, type: "supergroup" },
+      message_thread_id: 0,
+      photo: [{ file_id: "shot", width: 800, height: 600 }],
+      caption: "这是控制台报错截图",
+    },
+  }).message;
+  if (!captionedPhoto) throw Error("captionedPhoto");
+  expect(followupCandidate(w, captionedPhoto, "999")?.anchorRunId).toBe(a.id);
+
+  // A caption mentioning another teammate closes attention instead of queuing a follow-up.
+  const mentionedCaption = updateSchema.parse({
+    update_id: 21,
+    message: {
+      message_id: 31,
+      date: Math.floor(Date.now() / 1000),
+      from: { id: 101, is_bot: false },
+      chat: { id: -100100, type: "supergroup" },
+      message_thread_id: 0,
+      photo: [{ file_id: "shot2", width: 800, height: 600 }],
+      caption: "@alice 帮我看看这张图",
+      caption_entities: [{ type: "mention", offset: 0, length: 6 }],
+    },
+  }).message;
+  if (!mentionedCaption) throw Error("mentionedCaption");
+  expect(followupCandidate(w, mentionedCaption, "999")).toBeUndefined();
+  expect(a.followupClosed).toBe(true);
+
+  // Bare uncaptioned photo does not open a classifier call and closes attention.
+  const w2 = workspace();
+  const a2 = ask(w2);
+  answer(w2, a2);
+  const barePhoto = updateSchema.parse({
+    update_id: 22,
+    message: {
+      message_id: 32,
+      date: Math.floor(Date.now() / 1000),
+      from: { id: 101, is_bot: false },
+      chat: { id: -100100, type: "supergroup" },
+      message_thread_id: 0,
+      photo: [{ file_id: "bare", width: 800, height: 600 }],
+    },
+  }).message;
+  if (!barePhoto) throw Error("barePhoto");
+  expect(followupCandidate(w2, barePhoto, "999")).toBeUndefined();
+  expect(a2.followupClosed).toBe(true);
 });
 
 test("a recent forward can supply reference content while the same actor's explicit request is pending", () => {

@@ -1230,7 +1230,7 @@ export class Ingress {
     const topic = msg.message_thread_id ?? 0;
     let cmd = command(msg, d.bot);
     const attachments = messageAttachments(msg, d.bot.id);
-    const text = messageText(msg);
+    const text = messageText(msg, d.bot.id);
     const chat = w.chats.find((c) => c.id === chatId && c.active);
     if (msg.chat.type !== "private" && !chat) return;
     if (!controlOnly && (await routeDevelopment(sql, w, u, d.bot.id, msg, cmd)))
@@ -1261,7 +1261,7 @@ export class Ingress {
         args:
           followup.kind === "forward"
             ? forwardedRequest
-            : (msg.text?.trim() ?? ""),
+            : ((msg.text ?? msg.caption)?.trim() ?? ""),
       };
     const forwardAnchor =
       cmd?.name === "ask" ? privateForwardAnchor(w, msg, d.bot.id) : undefined;

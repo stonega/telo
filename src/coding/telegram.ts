@@ -21,7 +21,7 @@ export async function routeDevelopment(
   msg: Message,
   cmd?: { name: string; args: string },
 ) {
-  const text = messageText(msg);
+  const text = messageText(msg, botId);
   const attachments = messageAttachments(msg, botId);
   if (
     !msg.from ||

@@ -21,6 +21,7 @@ import { isAudioAttachment } from "../telegram/attachments.ts";
 import { telegramWidgetAvailable } from "../telegram/widgets.ts";
 import { repositoryReportWindow } from "../workflows/schedule.ts";
 import { contextSources } from "../workspaces/conversation-memory.ts";
+import { membersWithProfiles } from "../workspaces/member-profile.ts";
 import { hasDiscussionMemory } from "../workspaces/threads.ts";
 import { topicDiscussions } from "./discussions.ts";
 import {
@@ -197,6 +198,7 @@ export interface TurnContextMetadata {
     recent: { id: string; title: string }[];
   };
   actor: string;
+  speakers?: Record<string, { name?: string; username?: string }>;
   runId: string;
   now: string;
   workflowRepositories?: Run["githubRead"];
@@ -243,6 +245,27 @@ export function formatTurnPrompt(
     `<runtime_context>\n${JSON.stringify(runtimeMetadata)}\n</runtime_context>`,
   );
   return parts.join("\n\n");
+}
+
+function groupSpeakers(
+  w: Workspace,
+  run: Run,
+  sources: Source[],
+): Record<string, { name?: string; username?: string }> | undefined {
+  if (run.chatId === run.actor) return undefined;
+  const ids = new Set<string>([run.actor]);
+  for (const source of sources) {
+    if (source.author && source.author !== "assistant") ids.add(source.author);
+  }
+  const result: Record<string, { name?: string; username?: string }> = {};
+  for (const member of membersWithProfiles(w)) {
+    if (!ids.has(member.id)) continue;
+    const entry: { name?: string; username?: string } = {};
+    if (member.name?.trim()) entry.name = member.name.trim();
+    if (member.username?.trim()) entry.username = member.username.trim();
+    if (entry.name || entry.username) result[member.id] = entry;
+  }
+  return Object.keys(result).length ? result : undefined;
 }
 
 export function buildContext(
@@ -381,6 +404,7 @@ export function buildContext(
   const reportWindowUTC = workflow?.spec.github
     ? repositoryReportWindow(run.at, workflow.spec)
     : undefined;
+  const speakers = groupSpeakers(w, run, activeSources);
 
   // Compact per-turn runtime metadata placed at the tail of the final user turn so
   // changing timestamps, run IDs or snapshots never bust the cached history prefix.
@@ -398,6 +422,7 @@ export function buildContext(
     replyReference,
     discussions,
     actor: run.actor,
+    speakers,
     runId: run.id,
     now: run.at,
     workflowRepositories: run.githubRead,
@@ -450,6 +475,7 @@ export function buildContext(
     replyReference,
     discussions,
     actor: run.actor,
+    speakers,
     runId: run.id,
     now: run.at,
     workflowRepositories: run.githubRead,

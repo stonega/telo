@@ -202,3 +202,26 @@ test("ordinary answers omit native replies; specific citations select only same-
   run.workflowId = "scheduled";
   expect(answerReference(run, "Report [source:999:101:1]")).toBeUndefined();
 });
+
+test("interactive group answers default to the triggering message unless another source is cited", () => {
+  const w = workspace();
+  const groupRun = createRun(w, "101", "Check this", "-100100", 0, "gpt-4.1", {
+    botId: "999",
+    replyTo: 42,
+  });
+  groupRun.sources.unshift({
+    ...(groupRun.sources[0] as Source),
+    id: "-100100:10",
+    author: "202",
+    text: "Earlier message",
+  });
+  expect(answerReference(groupRun, "Looks good", "999")).toBe(42);
+  expect(
+    answerReference(groupRun, "Referring to [source:-100100:10]", "999"),
+  ).toBe(10);
+  groupRun.triggerKind = "mission_wakeup";
+  expect(answerReference(groupRun, "Background update", "999")).toBeUndefined();
+  groupRun.triggerKind = undefined;
+  groupRun.workflowId = "scheduled";
+  expect(answerReference(groupRun, "Scheduled recap", "999")).toBeUndefined();
+});

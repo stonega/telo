@@ -15,6 +15,7 @@ const argumentsSchema = z
     query: z.string().trim().min(1).max(200).optional(),
     threadId: z.string().uuid().optional(),
     discussionId: z.string().uuid().optional(),
+    includeGroupMessages: z.boolean().optional(),
     before: z.iso.datetime().optional(),
     cursor: z.string().min(1).max(256).optional(),
     limit: z.number().int().min(1).max(20).default(10),
@@ -26,6 +27,7 @@ export const chatHistoryParameters = Type.Object(
     query: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
     threadId: Type.Optional(Type.String({ format: "uuid" })),
     discussionId: Type.Optional(Type.String({ format: "uuid" })),
+    includeGroupMessages: Type.Optional(Type.Boolean()),
     before: Type.Optional(Type.String({ format: "date-time" })),
     cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
     limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
@@ -92,6 +94,15 @@ export function queryChatHistory(
       )
       .map((t) => t.id),
   );
+  const groupChat =
+    r.chatId !== r.actor
+      ? w.chats.find((c) => c.id === r.chatId && c.active)
+      : undefined;
+  const includeAmbient =
+    !!groupChat?.collection &&
+    !parsed.threadId &&
+    !parsed.discussionId &&
+    parsed.includeGroupMessages !== false;
   let matches = w.messages
     .filter(
       (m) =>
@@ -101,8 +112,8 @@ export function queryChatHistory(
           !w.runs.find((run) => run.id === m.runId)?.followup ||
           w.runs.find((run) => run.id === m.runId)?.followup?.decision ===
             "reply") &&
-        m.threadId &&
-        threads.has(m.threadId) &&
+        ((m.threadId && threads.has(m.threadId)) ||
+          (includeAmbient && !m.threadId && !m.runId && !m.directed)) &&
         (!discussion || discussion.messageIds.includes(m.id)) &&
         retainedSource(w, m) &&
         (!parsed.before || m.at < parsed.before) &&
@@ -126,28 +137,40 @@ export function queryChatHistory(
   for (const source of sources)
     if (!r.sources.some((s) => s.id === source.id)) r.sources.push(source);
   return {
-    coverage:
-      "Retained permitted conversations only: private history stays private; group retrieval stays in this group/topic. Text search is literal; results are excerpts, newest first. Older or pre-thread history may be unavailable.",
+    coverage: includeAmbient
+      ? "Retained permitted conversations and collected ordinary messages in this group/topic only. Text search is literal; results are excerpts, newest first. Older or uncollected history may be unavailable."
+      : "Retained permitted conversations only: private history stays private; group retrieval stays in this group/topic. Text search is literal; results are excerpts, newest first. Older or pre-thread history may be unavailable.",
     hasMore: matches.length > sources.length,
     nextCursor:
       matches.length > sources.length ? sources.at(-1)?.id : undefined,
-    messages: sources.map((m) => ({
-      id: m.id,
-      threadId: m.threadId,
-      role: m.role,
-      author: m.author,
-      at: m.at,
-      text: m.text,
-      telegramMessageId:
-        m.role === "user"
-          ? w.runs.find((run) => run.id === m.runId)?.replyTo
-          : w.deliveries.find(
-              (d) =>
-                d.runId === m.runId &&
-                d.id === `run:${m.runId}:result` &&
-                d.state === "sent",
-            )?.remoteId,
-    })),
+    messages: sources.map((m) => {
+      const ambientId =
+        !m.threadId && m.id.startsWith(`${r.chatId}:`)
+          ? Number(m.id.slice(r.chatId.length + 1))
+          : undefined;
+      return {
+        id: m.id,
+        threadId: m.threadId,
+        ambient: !m.threadId || undefined,
+        role: m.role,
+        author: m.author,
+        at: m.at,
+        text: m.text,
+        telegramMessageId:
+          m.role === "user"
+            ? w.runs.find((run) => run.id === m.runId)?.replyTo
+            : m.role === "assistant"
+              ? w.deliveries.find(
+                  (d) =>
+                    d.runId === m.runId &&
+                    d.id === `run:${m.runId}:result` &&
+                    d.state === "sent",
+                )?.remoteId
+              : Number.isSafeInteger(ambientId) && (ambientId ?? 0) > 0
+                ? ambientId
+                : undefined,
+      };
+    }),
   };
 }
 

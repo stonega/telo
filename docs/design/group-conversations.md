@@ -57,9 +57,14 @@ Message content alone does not silently change thread membership: the model can
 retrieve related public discussions when interpreting an explicitly addressed ask.
 
 Context contains that conversation's retained user/assistant messages in execution
-order, with speaker IDs. It does not automatically mix all group messages into every
-answer. `query_chat_history` can retrieve retained conversations from the same
-group/topic/bot, including other participants' public discussions, but cannot retrieve
+order, with speaker IDs (plus a tail runtime-context map of saved member display
+names/usernames for participating speakers, treated as display metadata only while
+keeping numeric IDs as canonical identity and preserving the prompt-cache prefix). It
+does not automatically mix all group messages into every answer. `query_chat_history`
+can retrieve retained conversations from the same group/topic/bot, including other
+participants' public discussions, as well as collected ordinary group messages in
+that same group/topic when group message collection is enabled (unless filtered by
+`threadId`, `discussionId`, or `includeGroupMessages: false`). It cannot retrieve
 private chats or other topics. Private retrieval remains restricted to the requesting
 user's private history. Every tool still checks current workspace access.
 
@@ -71,9 +76,14 @@ new interactive Telegram requests establish the new thread mapping.
 Explicitly addressed messages from the same actor can join their active Pi run at
 the next turn boundary, with one final answer incorporating the new input. They
 do not absorb another participant's request. Already queued turns retain their
-ordering, and unaddressed messages still follow the candidate rules below. Ordinary
-answers omit native reply quotations; explicit citations can emphasize a retained
-message from this bot/group/Topic.
+ordering, and unaddressed messages still follow the candidate rules below. Interactive
+group answers default to a native Telegram reply to the triggering message so replies
+stay anchored in busy groups; explicit citations can instead target another retained
+human message from this bot/group/Topic. When a group member replies to another
+participant's ordinary message and addresses the bot, the replied-to message's text
+and supported attachments are included as untrusted reference material (skipping the
+bot's own messages and empty forum-topic service messages) without granting the
+original sender any workspace permissions.
 
 ## Forwarded reference messages
 
@@ -109,8 +119,10 @@ An ordinary unaddressed text message is only a candidate when all of the followi
   and a confirmed final delivery. A teammate's answer cannot open their window.
 - The answer finished within five minutes; the incoming Telegram timestamp is
   recent and not before that answer (allowing Telegram's one-second precision).
-- The message contains at most 500 characters of nonempty text and has no reply,
-  mention, text-mention entity, or command directed elsewhere.
+- The message contains at most 500 characters of nonempty text or media caption and
+  has no reply, mention, text-mention entity, or command directed elsewhere. When
+  media attachments accompany the caption, their attachment metadata is included for
+  classification and the attachments stay attached if accepted.
 
 Time and length are conservative application defaults, not Telegram limits. The
 window uses answer completion time; delayed deliveries do not extend it. While a
