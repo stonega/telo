@@ -11,7 +11,10 @@ import type { Run, Workspace } from "../../src/domain.ts";
 import { sweep } from "../../src/privacy/service.ts";
 import { followupCandidate } from "../../src/telegram/followup.ts";
 import { type Message, updateSchema } from "../../src/telegram/router.ts";
-import { approvalCardSync } from "../../src/telegram/webhook.ts";
+import {
+  applyGroupBotVisibility,
+  approvalCardSync,
+} from "../../src/telegram/webhook.ts";
 import {
   commitDiscussions,
   memoryReferences,
@@ -265,6 +268,14 @@ test("queryChatHistory includes collected ambient group messages in the same gro
   const w = workspace();
   const chat = w.chats.find((c) => c.id === "-100100");
   if (chat) chat.collection = true;
+  w.members.push({
+    id: "303",
+    role: "member",
+    active: true,
+    name: "Bob",
+    username: "bobdev",
+    profileUpdatedAt: new Date().toISOString(),
+  });
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 86400000).toISOString();
   w.messages.push(
@@ -294,6 +305,7 @@ test("queryChatHistory includes collected ambient group messages in the same gro
   expect(found.messages.map((m) => m.id)).toEqual(["-100100:501"]);
   expect(found.messages[0]).toMatchObject({
     ambient: true,
+    authorName: "Bob (@bobdev)",
     telegramMessageId: 501,
   });
   // Opting out of ambient messages or specifying a threadId restricts to threaded history.
@@ -438,6 +450,55 @@ test("approvalCardSync appends group decider status and removes buttons without 
       text: "Save personal instruction?\nBe brief.\n\nStatus: Rejected.",
     },
   });
+});
+
+test("applyGroupBotVisibility syncs chat.visibleAll on bot admin promotion and demotion", () => {
+  const w = workspace();
+  const chat = w.chats.find((c) => c.id === "-100100");
+  if (!chat) throw Error("chat");
+  chat.visibleAll = false;
+  const bot = { id: "999", visibleAll: false };
+
+  const promoted = updateSchema.parse({
+    update_id: 40,
+    my_chat_member: {
+      chat: { id: -100100, type: "supergroup" },
+      from: { id: 101, is_bot: false },
+      date: 1,
+      new_chat_member: {
+        status: "administrator",
+        user: { id: 999, is_bot: true, username: "test_bot" },
+      },
+    },
+  }).my_chat_member;
+  if (!promoted) throw Error("promoted");
+  expect(applyGroupBotVisibility(w, bot, promoted)).toBe(true);
+  expect(chat.visibleAll).toBe(true);
+  expect(w.audit.at(-1)?.action).toBe("chat.visibility_updated");
+
+  // Demoting back to regular member restores the bot's privacy-mode visibility.
+  const demoted = updateSchema.parse({
+    update_id: 41,
+    my_chat_member: {
+      chat: { id: -100100, type: "supergroup" },
+      from: { id: 101, is_bot: false },
+      date: 2,
+      new_chat_member: {
+        status: "member",
+        user: { id: 999, is_bot: true, username: "test_bot" },
+      },
+    },
+  }).my_chat_member;
+  if (!demoted) throw Error("demoted");
+  expect(applyGroupBotVisibility(w, bot, demoted)).toBe(true);
+  expect(chat.visibleAll).toBe(false);
+
+  // If privacy mode is disabled (bot.visibleAll = true), demotion still keeps visibleAll true.
+  chat.visibleAll = false;
+  expect(
+    applyGroupBotVisibility(w, { id: "999", visibleAll: true }, demoted),
+  ).toBe(true);
+  expect(chat.visibleAll).toBe(true);
 });
 
 test("a recent forward can supply reference content while the same actor's explicit request is pending", () => {

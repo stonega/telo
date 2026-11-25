@@ -106,6 +106,26 @@ export function approvalCardSync(
   };
 }
 
+export function applyGroupBotVisibility(
+  w: Workspace,
+  bot: Pick<NonNullable<Deployment["bot"]>, "id" | "visibleAll"> | undefined,
+  membership: NonNullable<Update["my_chat_member"]>,
+) {
+  const changed = String(membership.new_chat_member.user.id);
+  if (!bot || changed !== bot.id) return false;
+  const status = membership.new_chat_member.status;
+  if (!["administrator", "member", "restricted"].includes(status)) return false;
+  const chat = w.chats.find(
+    (c) => c.id === String(membership.chat.id) && c.active,
+  );
+  if (!chat) return false;
+  const nextVisible = status === "administrator" ? true : !!bot.visibleAll;
+  if (chat.visibleAll === nextVisible) return false;
+  chat.visibleAll = nextVisible;
+  audit(w, changed, "chat.visibility_updated", chat.id);
+  return true;
+}
+
 export class Ingress {
   private repositorySync?: RepositorySync;
   constructor(
@@ -1221,6 +1241,8 @@ export class Ingress {
         }
         revokeWork(w);
         audit(w, changed, "membership.removed", String(membership.chat.id));
+      } else if (u.my_chat_member) {
+        applyGroupBotVisibility(w, d.bot, u.my_chat_member);
       }
       return true;
     }

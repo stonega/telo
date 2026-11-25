@@ -6,6 +6,7 @@ import {
   requireThat,
   type Workspace,
 } from "../domain.ts";
+import { membersWithProfiles } from "../workspaces/member-profile.ts";
 import { eligible } from "../workspaces/policy.ts";
 import { retainedSource } from "../workspaces/threads.ts";
 import { topicDiscussions } from "./discussions.ts";
@@ -136,6 +137,20 @@ export function queryChatHistory(
   // Retrieved excerpts become authorized citation sources for this execution only.
   for (const source of sources)
     if (!r.sources.some((s) => s.id === source.id)) r.sources.push(source);
+  const memberLabels =
+    r.chatId !== r.actor
+      ? new Map(
+          membersWithProfiles(w)
+            .map((m) => {
+              const name = m.name?.trim();
+              const handle = m.username?.trim() ? `@${m.username.trim()}` : "";
+              const label =
+                name && handle ? `${name} (${handle})` : name || handle;
+              return label ? ([m.id, label] as const) : undefined;
+            })
+            .filter((entry): entry is readonly [string, string] => !!entry),
+        )
+      : undefined;
   return {
     coverage: includeAmbient
       ? "Retained permitted conversations and collected ordinary messages in this group/topic only. Text search is literal; results are excerpts, newest first. Older or uncollected history may be unavailable."
@@ -154,6 +169,7 @@ export function queryChatHistory(
         ambient: !m.threadId || undefined,
         role: m.role,
         author: m.author,
+        authorName: memberLabels?.get(m.author),
         at: m.at,
         text: m.text,
         telegramMessageId:

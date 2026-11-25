@@ -247,7 +247,7 @@ export function formatTurnPrompt(
   return parts.join("\n\n");
 }
 
-function groupSpeakers(
+export function groupSpeakers(
   w: Workspace,
   run: Run,
   sources: Source[],

@@ -56,6 +56,7 @@ import {
   chatHistoryParameters,
   queryChatHistory,
 } from "./chat-history.ts";
+import { groupSpeakers } from "./context.ts";
 import {
   authorizeDiscussion,
   authorizeDiscussionQuery,
@@ -744,12 +745,17 @@ export function applicationTools(
       "read_chat_context",
       "Read only retained, authorized context for this run.",
       Type.Object({}),
-      (_w, r) => ({
-        ...(r.workflowId ? { historicalReference: true } : {}),
-        summary: r.contextSummary?.text,
-        coverage: r.coverage,
-        sources: contextSources(r),
-      }),
+      (w, r) => {
+        const sources = contextSources(r);
+        const speakers = groupSpeakers(w, r, sources);
+        return {
+          ...(r.workflowId ? { historicalReference: true } : {}),
+          summary: r.contextSummary?.text,
+          coverage: r.coverage,
+          ...(speakers ? { speakers } : {}),
+          sources,
+        };
+      },
     ),
     bind(
       "read_instructions",
