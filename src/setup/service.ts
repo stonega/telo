@@ -192,27 +192,10 @@ export class SetupService {
     input = credentialsSchema.parse(input);
     let identity: BotIdentity | undefined;
     if (input.botToken) {
-      const botClient = this.transport(input.botToken);
-      identity = await botClient.call<BotIdentity>("getMe");
+      identity = await this.transport(input.botToken).call<BotIdentity>(
+        "getMe",
+      );
       requireThat(identity.is_bot && identity.username, "invalid_bot");
-      if (!identity.can_read_all_group_messages) {
-        try {
-          const updated = await botClient.call<boolean>("setMySettings", {
-            can_join_groups: true,
-            can_read_all_group_messages: true,
-            callback_query_mode: "default",
-          });
-          if (updated === true) {
-            identity = {
-              ...identity,
-              can_join_groups: true,
-              can_read_all_group_messages: true,
-            };
-          }
-        } catch {
-          /* Best-effort: never block bot credential setup if Telegram rejects setMySettings. */
-        }
-      }
     }
     await transaction(this.store.pool, async (sql) => {
       const d = await this.store.deployment(sql, true);
@@ -555,33 +538,6 @@ export class SetupService {
       );
     });
     return this.progress(admin);
-  }
-  /** Best-effort: disable group privacy mode via Bot API 10.5 so new groups receive @mentions. */
-  async ensureGroupPrivacyDisabled() {
-    const d = await this.store.deployment();
-    if (!d.bot || d.bot.visibleAll || !d.credentials.bot) return false;
-    try {
-      const client = await this.client(d);
-      const updated = await client.call<boolean>("setMySettings", {
-        can_join_groups: true,
-        can_read_all_group_messages: true,
-        callback_query_mode: "default",
-      });
-      if (updated !== true) return false;
-      const botId = d.bot.id;
-      await transaction(this.store.pool, async (sql) => {
-        const current = await this.store.deployment(sql, true);
-        if (!current.bot || current.bot.id !== botId || current.bot.visibleAll)
-          return;
-        current.bot.visibleAll = true;
-        current.bot.canJoinGroups = true;
-        current.version++;
-        await this.store.saveDeployment(sql, current);
-      });
-      return true;
-    } catch {
-      return false;
-    }
   }
   async syncBotSettings(admin: Admin) {
     operator(admin);

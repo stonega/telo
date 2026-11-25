@@ -421,11 +421,10 @@ export function workspaceRoutes(deps: AdminRouteDeps) {
     const deployment = await store.deployment();
     requireThat(deployment.bot, "bot_not_configured", 409);
     const bot = deployment.bot;
-    const link = await change(c, (w) =>
-      issueGroupLink(w, c.get("session").admin, bot),
+    return c.json(
+      await change(c, (w) => issueGroupLink(w, c.get("session").admin, bot)),
+      201,
     );
-    await setup.ensureGroupPrivacyDisabled();
-    return c.json(link, 201);
   });
   app.get("/api/admin/workspaces/:id/chats/:chat/repository", async (c) => {
     const w = await store.read(validId(c.req.param("id")));

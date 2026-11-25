@@ -7,13 +7,15 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { login } from "../../src/admin/auth.ts";
 import { threadDetail } from "../../src/admin/thread-history.ts";
+import { createApp } from "../../src/app.ts";
 import { migrate } from "../../src/db/migrate.ts";
 import { database } from "../../src/db/pool.ts";
 import { Store } from "../../src/db/repositories.ts";
 import type { Admin, Workspace } from "../../src/domain.ts";
 import { DeliveryWorker } from "../../src/jobs/delivery.ts";
-import { encrypt } from "../../src/setup/credentials.ts";
+import { encrypt, passwordHash } from "../../src/setup/credentials.ts";
 import { SetupService } from "../../src/setup/service.ts";
 import type { Telegram } from "../../src/telegram/client.ts";
 import { updateSchema } from "../../src/telegram/router.ts";
@@ -142,42 +144,66 @@ const rootUrl = process.env.TEST_DATABASE_URL;
       );
     });
 
-    test("saveCredentials and ensureGroupPrivacyDisabled auto-disable group privacy mode via setMySettings", async () => {
+    test("issuing a group link token never calls setMySettings or alters deployment privacy mode", async () => {
+      const wsAdminId = randomUUID();
+      const encoded = await passwordHash("workspace admin test password");
+      await store.pool.query(
+        "INSERT INTO admins(id,username,password_hash,telegram_id,operator) VALUES($1,'wsadmin',$2,'303',false)",
+        [wsAdminId, encoded],
+      );
+      const session = await login(
+        store.pool,
+        "wsadmin",
+        "workspace admin test password",
+      );
+      const app = createApp(store, setup, "https://telo.example.com");
+      const res = await app.request(
+        `https://telo.example.com/api/admin/workspaces/${w.id}/chats/link-token`,
+        {
+          method: "POST",
+          headers: {
+            cookie: `telo_session=${session.raw}`,
+            "x-csrf-token": session.csrf,
+            origin: "https://telo.example.com",
+          },
+        },
+      );
+      expect(res.status).toBe(201);
+      expect(calls.some((c) => c.method === "setMySettings")).toBe(false);
+      expect((await store.deployment()).bot?.visibleAll).toBe(false);
+    });
+
+    test("saveCredentials never calls setMySettings on version conflict or success; only explicit operator saveBotSettings does", async () => {
+      await expect(
+        setup.saveCredentials(admin, {
+          version: 999,
+          botToken: "123456789:AAABBBCCCDDDEEEFFFGGGHHHIIIJJJKKKLL",
+        }),
+      ).rejects.toThrow("version_conflict");
+      expect(calls.some((c) => c.method === "setMySettings")).toBe(false);
+
+      calls = [];
       const progress = await setup.saveCredentials(admin, {
         version: 1,
         botToken: "123456789:AAABBBCCCDDDEEEFFFGGGHHHIIIJJJKKKLL",
       });
-      expect(calls).toContainEqual({
-        method: "setMySettings",
-        params: {
-          can_join_groups: true,
-          can_read_all_group_messages: true,
-          callback_query_mode: "default",
-        },
-      });
-      expect(progress.bot?.visibleAll).toBe(true);
-      expect(progress.bot?.canJoinGroups).toBe(true);
+      expect(calls.some((c) => c.method === "setMySettings")).toBe(false);
+      expect(progress.bot?.visibleAll).toBe(false);
 
-      // Reset deployment to privacy-enabled and verify ensureGroupPrivacyDisabled().
-      calls = [];
-      botInfo.can_read_all_group_messages = false;
-      const current = await store.deployment();
-      await store.pool.query("UPDATE deployment SET data=$1 WHERE id=true", [
-        JSON.stringify({
-          ...current,
-          bot: { id: "999", username: "telo_bot", visibleAll: false },
+      // Non-operator workspace admin cannot call saveBotSettings either.
+      const nonOperator: Admin = {
+        id: randomUUID(),
+        username: "member-admin",
+        telegramId: "303",
+        operator: false,
+      };
+      await expect(
+        setup.saveBotSettings(nonOperator, {
+          version: progress.version,
+          visibleAll: true,
         }),
-      ]);
-      expect(await setup.ensureGroupPrivacyDisabled()).toBe(true);
-      expect(calls).toContainEqual({
-        method: "setMySettings",
-        params: {
-          can_join_groups: true,
-          can_read_all_group_messages: true,
-          callback_query_mode: "default",
-        },
-      });
-      expect((await store.deployment()).bot?.visibleAll).toBe(true);
+      ).rejects.toThrow("operator_required");
+      expect(calls.some((c) => c.method === "setMySettings")).toBe(false);
     });
 
     test("saveBotSettings calls setMySettings with callback_query_mode default and persists BotFullInfo", async () => {
