@@ -17,6 +17,7 @@ export function googleExtension(
   workspaceId: string,
   revision: number,
   plugin: GooglePlugin,
+  includeInstructions = true,
 ): BuiltinExtension {
   const def = googleDefinitions[plugin];
   const id = Type.String({ pattern: "^[A-Za-z0-9_-]{1,256}$" });
@@ -88,9 +89,11 @@ export function googleExtension(
       "extension_configuration_changed",
     ],
     factory: (input) => async (pi) => {
-      pi.on("before_agent_start", (event) => ({
-        systemPrompt: `${event.systemPrompt}\n\n${instructions}`,
-      }));
+      if (includeInstructions) {
+        pi.on("before_agent_start", (event) => ({
+          systemPrompt: `${event.systemPrompt}\n\n${instructions}`,
+        }));
+      }
       pi.registerTool({
         name: def.tool,
         label: def.name,
@@ -127,7 +130,7 @@ export function googleWorkspaceExtension(
   revision: number,
 ): BuiltinExtension {
   const parts = googlePlugins.map((plugin) =>
-    googleExtension(service, workspaceId, revision, plugin),
+    googleExtension(service, workspaceId, revision, plugin, false),
   );
   if (searchConsole)
     parts.push(searchConsoleExtension(searchConsole, workspaceId, revision));
@@ -144,6 +147,9 @@ export function googleWorkspaceExtension(
       ...new Set(parts.flatMap((part) => part.toolErrorCodes ?? [])),
     ],
     factory: (input) => async (pi) => {
+      pi.on("before_agent_start", (event) => ({
+        systemPrompt: `${event.systemPrompt}\n\n${instructions}`,
+      }));
       for (const part of parts) await part.factory(input)(pi);
     },
   };

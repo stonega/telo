@@ -3,6 +3,7 @@ import type { AgentMessage, StreamFn } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { Type } from "typebox";
+import { ExtensionCatalog } from "../../src/agent/extensions.ts";
 import {
   type AgentInput,
   failedStream,
@@ -10,7 +11,17 @@ import {
   selectedModel,
 } from "../../src/agent/runtime.ts";
 import { estimateContextTokens } from "../../src/agent/tokens.ts";
+import {
+  browserExtension,
+  browserInstructions,
+} from "../../src/browser/extension.ts";
+import { BrowserService } from "../../src/browser/service.ts";
+import { database } from "../../src/db/pool.ts";
+import { Store } from "../../src/db/repositories.ts";
 import { Fault } from "../../src/domain.ts";
+import { googleWorkspaceExtension } from "../../src/google/extension.ts";
+import { GoogleService } from "../../src/google/service.ts";
+import { RuntimeLogger } from "../../src/observability/logs.ts";
 
 function message(
   content: AssistantMessage["content"],
@@ -934,4 +945,184 @@ test("automatic output rejects an unaffordable input before reserving or dispatc
   ).rejects.toThrow("workspace_budget_exhausted");
   expect(sent).toBe(0);
   expect(reserved).toBe(0);
+});
+
+test("prompt cache retention, cache_control, prompt_cache_key and session affinity match provider capabilities", async () => {
+  const openaiModel = selectedModel("gpt-5.4");
+  expect(openaiModel.provider).toBe("openai");
+  expect(openaiModel.compat?.supportsLongCacheRetention).toBe(true);
+  expect(openaiModel.compat?.promptCacheKeyMode).toBe("enabled");
+
+  const retentions: (string | undefined)[] = [];
+  const captureRunner = new PiRunner((_m, _c, opts) => {
+    retentions.push(opts?.cacheRetention);
+    return stream(message([{ type: "text", text: "Cached" }]));
+  });
+  await captureRunner.run(input({ model: openaiModel }));
+  await captureRunner.run(input({ model: openaiModel, purpose: "followup" }));
+  expect(retentions).toEqual(["long", "short"]);
+
+  const openrouterClaude = selectedModel("anthropic/claude-sonnet-4-5", {
+    modelBaseUrl: "https://openrouter.ai/api/v1",
+  });
+  expect(openrouterClaude.provider).toBe("openrouter");
+  expect(openrouterClaude.compat?.cacheControlFormat).toBe("anthropic");
+  expect(openrouterClaude.compat?.sessionAffinityFormat).toBe("openrouter");
+  expect(openrouterClaude.compat?.sendSessionAffinityHeaders).toBe(true);
+
+  const wireRequests: {
+    headers: Record<string, string>;
+    body: Record<string, unknown>;
+  }[] = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      wireRequests.push({
+        headers: Object.fromEntries(req.headers.entries()),
+        body: (await req.json()) as Record<string, unknown>,
+      });
+      return new Response(
+        [
+          `data: ${JSON.stringify({
+            id: "chatcmpl-cache",
+            object: "chat.completion.chunk",
+            created: 1,
+            model: "test",
+            choices: [
+              {
+                index: 0,
+                delta: { role: "assistant", content: "Hi" },
+                finish_reason: null,
+              },
+            ],
+          })}\n\n`,
+          `data: ${JSON.stringify({
+            id: "chatcmpl-cache",
+            object: "chat.completion.chunk",
+            created: 1,
+            model: "test",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: {
+              prompt_tokens: 100,
+              completion_tokens: 2,
+              total_tokens: 102,
+            },
+          })}\n\n`,
+          "data: [DONE]\n\n",
+        ].join(""),
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    },
+  });
+  try {
+    const baseUrl = `http://127.0.0.1:${server.port}/v1`;
+    const proxyGpt = selectedModel("gpt-5.4", {
+      modelBaseUrl: baseUrl,
+      modelPricing: { input: 1, output: 3 },
+    });
+    await new PiRunner().run(
+      input({
+        model: proxyGpt,
+        cacheKey: "a".repeat(64),
+        apiKey: "proxy-key",
+      }),
+    );
+    expect(wireRequests[0]?.body.prompt_cache_key).toBe("a".repeat(64));
+    expect(wireRequests[0]?.body.prompt_cache_retention).toBeUndefined();
+    expect(wireRequests[0]?.headers["x-session-affinity"]).toBe("a".repeat(64));
+
+    const newApiClaude = selectedModel("claude-sonnet-4-5", {
+      modelBaseUrl: baseUrl,
+      providerType: "newapi",
+      modelPricing: { input: 3, output: 15 },
+    });
+    await new PiRunner().run(
+      input({
+        model: newApiClaude,
+        cacheKey: "b".repeat(64),
+        apiKey: "proxy-key",
+        system: "System prompt text",
+        tools: [
+          {
+            name: "ping",
+            label: "Ping",
+            description: "Ping tool",
+            parameters: Type.Object({}),
+            execute: async () => ({ content: [], details: {} }),
+          },
+        ],
+      }),
+    );
+    const claudePayload = JSON.stringify(wireRequests[1]?.body);
+    expect(claudePayload).toContain('"cache_control":{"type":"ephemeral"}');
+    expect(wireRequests[1]?.headers["x-session-affinity"]).toBe("b".repeat(64));
+  } finally {
+    await server.stop(true);
+  }
+});
+
+test("Google workspace extension deduplicates prompt instructions and unconfigured Browser uses compact prompt", async () => {
+  const pool = database("postgres://unused@127.0.0.1:1/unused");
+  const store = new Store(
+    pool,
+    new RuntimeLogger(undefined, "worker", () => {}),
+  );
+  try {
+    const workspaceId = "00000000-0000-4000-8000-000000000099";
+    store.read = async () =>
+      ({
+        id: workspaceId,
+        runs: [{ id: "run-1", actor: "101", status: "running", fence: 1 }],
+      }) as never;
+    const google = new GoogleService(
+      store,
+      "ab".repeat(32),
+      "https://fixture.invalid",
+    );
+    const unconfiguredBrowser = new BrowserService(store, "ab".repeat(32));
+    expect(unconfiguredBrowser.configured).toBe(false);
+
+    const catalog = ExtensionCatalog.fromSnapshot(
+      [],
+      [
+        googleWorkspaceExtension(google, undefined, workspaceId, 1),
+        browserExtension(unconfiguredBrowser, workspaceId, 1),
+      ],
+    );
+    const host = await catalog.open(
+      input({
+        workspaceId,
+        runId: "run-1",
+        actor: "101",
+        system: "Base system",
+      }),
+    );
+    if (!host) throw new Error("missing extension host");
+    try {
+      const assembled = await host.start();
+      const googleMatches = assembled.match(
+        /Google account tools are read-only\./g,
+      );
+      expect(googleMatches).toHaveLength(1);
+      expect(assembled).toContain(
+        "Private Browser is not configured on this server.",
+      );
+      expect(assembled).not.toContain(browserInstructions);
+      expect(host.tools.map((t) => t.name)).toEqual(
+        expect.arrayContaining([
+          "query_google_docs",
+          "query_google_sheets",
+          "query_google_drive",
+          "query_gmail",
+          "browser_session",
+          "browser_action",
+        ]),
+      );
+    } finally {
+      await host?.close();
+    }
+  } finally {
+    await pool.end();
+  }
 });

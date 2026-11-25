@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
+import { Client } from "pg";
 import { PgBoss } from "pg-boss";
 import type { AgentRunner, RunnerProvider } from "../agent/runtime.ts";
 import type { BrowserService } from "../browser/service.ts";
@@ -76,6 +78,67 @@ export async function dispatch(store: Store, boss: PgBoss) {
     }
     return rows.rowCount;
   });
+}
+
+export interface OutboxWakePayload {
+  w?: string;
+  r?: number;
+  d?: string[];
+}
+
+function listenOutbox(
+  url: string,
+  onWake: (payload?: OutboxWakePayload) => void,
+  signal: AbortSignal,
+  log: RuntimeLogger,
+): Promise<void> {
+  return (async () => {
+    while (!signal.aborted) {
+      const client = new Client({
+        connectionString: url,
+        connectionTimeoutMillis: 5000,
+      });
+      const disconnected = Promise.withResolvers<void>();
+      const onDisconnect = () => disconnected.resolve();
+      const onAbort = () => disconnected.resolve();
+      client.on("error", onDisconnect);
+      client.on("end", onDisconnect);
+      client.on("notification", (msg) => {
+        if (msg.channel !== "telo_outbox" || signal.aborted) return;
+        let parsed: OutboxWakePayload | undefined;
+        if (msg.payload) {
+          try {
+            parsed = JSON.parse(msg.payload) as OutboxWakePayload;
+          } catch {
+            parsed = undefined;
+          }
+        }
+        onWake(parsed);
+      });
+      signal.addEventListener("abort", onAbort, { once: true });
+      try {
+        await client.connect();
+        if (!signal.aborted) {
+          await client.query("LISTEN telo_outbox");
+          // Catch any rows committed before LISTEN became active.
+          onWake();
+          await disconnected.promise;
+        }
+      } catch (error) {
+        if (!signal.aborted) {
+          log.write("worker_maintenance_failed", { error });
+        }
+      } finally {
+        signal.removeEventListener("abort", onAbort);
+        client.removeListener("error", onDisconnect);
+        client.removeListener("end", onDisconnect);
+        await client.end().catch(() => {});
+      }
+      if (!signal.aborted) {
+        await sleep(2000, undefined, { signal }).catch(() => {});
+      }
+    }
+  })();
 }
 
 export interface WorkerDependencies {
@@ -203,6 +266,71 @@ export async function startWorker(
     runs.poll().catch((error) => {
       store.log.write("worker_maintenance_failed", { error });
     });
+  const immediateDeliveries = new Set<Promise<void>>();
+  const pendingImmediateDeliveries = new Map<string, Set<string>>();
+  let outboxWakeRunning: Promise<void> | undefined;
+  let outboxWakePending = false;
+  let outboxRunPending = false;
+  const triggerImmediateDelivery = (
+    workspaceId: string,
+    deliveryId: string,
+  ) => {
+    if (shutdown.signal.aborted || immediateDeliveries.size >= 4) return;
+    const task = delivery
+      .send(workspaceId, deliveryId)
+      .catch((error) => {
+        store.log.write("worker_maintenance_failed", {
+          workspaceId,
+          error,
+        });
+      })
+      .finally(() => {
+        immediateDeliveries.delete(task);
+      });
+    immediateDeliveries.add(task);
+  };
+  const wakeOutbox = (payload?: OutboxWakePayload) => {
+    if (shutdown.signal.aborted) return;
+    if (payload?.r) outboxRunPending = true;
+    if (payload?.w && Array.isArray(payload.d) && payload.d.length > 0) {
+      let set = pendingImmediateDeliveries.get(payload.w);
+      if (!set) {
+        set = new Set();
+        pendingImmediateDeliveries.set(payload.w, set);
+      }
+      for (const id of payload.d) {
+        if (typeof id === "string" && id) set.add(id);
+      }
+    }
+    outboxWakePending = true;
+    if (outboxWakeRunning) return;
+    outboxWakeRunning = (async () => {
+      while (outboxWakePending && !shutdown.signal.aborted) {
+        outboxWakePending = false;
+        const wakeRuns = outboxRunPending;
+        outboxRunPending = false;
+        const deliveriesBatch = [...pendingImmediateDeliveries.entries()].map(
+          ([workspaceId, ids]) => [workspaceId, [...ids]] as const,
+        );
+        pendingImmediateDeliveries.clear();
+        try {
+          const dispatched = await dispatch(store, boss);
+          if ((dispatched ?? 0) > 0 || wakeRuns) {
+            await runTick();
+          }
+          for (const [workspaceId, ids] of deliveriesBatch) {
+            for (const deliveryId of ids) {
+              triggerImmediateDelivery(workspaceId, deliveryId);
+            }
+          }
+        } catch (error) {
+          store.log.write("worker_maintenance_failed", { error });
+        }
+      }
+    })().finally(() => {
+      outboxWakeRunning = undefined;
+    });
+  };
   await boss.work<JobData>(
     "delivery",
     { localConcurrency: 2, pollingIntervalSeconds: 1 },
@@ -387,6 +515,12 @@ export async function startWorker(
   // Slow maintenance and upstream delivery do not imply that this process died.
   const heartbeatTimer = setInterval(() => void heartbeatTick(), 5000);
   const runTimer = setInterval(() => void runTick(), 1000);
+  const outboxListener = listenOutbox(
+    url,
+    wakeOutbox,
+    shutdown.signal,
+    store.log,
+  );
   const polling =
     setup.telegramTransport === "polling"
       ? new TelegramPoller(
@@ -540,6 +674,9 @@ export async function startWorker(
     clearInterval(menuTimer);
     clearInterval(reviewTimer);
     shutdown.abort();
+    await outboxListener;
+    await outboxWakeRunning;
+    await Promise.all(immediateDeliveries);
     await runs.drain();
     await reviewBusy;
     await Promise.all([polling, boss.stop({ graceful: true, timeout: 10000 })]);

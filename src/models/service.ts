@@ -39,6 +39,7 @@ export function providerModelOptions(
   return {
     ...selection,
     modelBaseUrl: provider.baseUrl,
+    ...(provider.type ? { providerType: provider.type } : {}),
     modelMetadata: withPriceTier(
       provider.modelMetadata?.find((m) => m.id === selection.model),
       selection.modelPriceTier,

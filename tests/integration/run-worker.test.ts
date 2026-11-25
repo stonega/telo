@@ -14,7 +14,7 @@ import { migrate, migrateJobs } from "../../src/db/migrate.ts";
 import { database } from "../../src/db/pool.ts";
 import { Store } from "../../src/db/repositories.ts";
 import { Executor } from "../../src/jobs/execute.ts";
-import { dispatch, queue } from "../../src/jobs/queue.ts";
+import { dispatch, queue, startWorker } from "../../src/jobs/queue.ts";
 import { recoverJobs } from "../../src/jobs/recovery.ts";
 import { RunWorker } from "../../src/jobs/runs.ts";
 import { encrypt } from "../../src/setup/credentials.ts";
@@ -319,5 +319,66 @@ const url = process.env.TEST_DATABASE_URL;
         expect(saved?.attempts[0]?.reserved).toBe(0.001);
       });
     }
+
+    test("outbox LISTEN/NOTIFY wakes run execution and delivery immediately without waiting for 5s maintenance", async () => {
+      const target = new URL(url ?? "");
+      target.pathname = `/${name}`;
+      const delivered = Promise.withResolvers<string>();
+      const deployment = await store.deployment();
+      deployment.bot = { id: "999", username: "fast_bot", visibleAll: true };
+      deployment.credentials.bot = encrypt(key, "bot", "999:synthetic-token");
+      await store.saveDeployment(store.pool, deployment);
+      const fastSetup = new SetupService(
+        store,
+        key,
+        "http://localhost:3000",
+        () => ({
+          async call<T>(method: string, params: Record<string, unknown> = {}) {
+            if (method === "sendRichMessage" || method === "sendMessage") {
+              delivered.resolve(String(params.text ?? "rich"));
+              return { message_id: 888 } as T;
+            }
+            return true as T;
+          },
+        }),
+        "webhook",
+      );
+      const w = workspace();
+      w.operatorId = operator;
+      await store.pool.query(
+        "INSERT INTO workspaces(id,operator_id,data) VALUES($1,$2,$3)",
+        [w.id, operator, JSON.stringify(w)],
+      );
+      const stop = await startWorker({
+        store,
+        setup: fastSetup,
+        databaseUrl: target.toString(),
+        runner: {
+          async run() {
+            return result();
+          },
+        },
+      });
+      try {
+        // Give LISTEN telo_outbox a moment to attach, then measure pure wakeup latency.
+        await new Promise((r) => setTimeout(r, 100));
+        const startedAt = performance.now();
+        await store.change(w.id, (current) =>
+          createRun(current, "101", "hi", "101", 0, "gpt-4.1-mini", {
+            botId: "999",
+          }),
+        );
+        await Promise.race([
+          delivered.promise,
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("wakeup timed out")), 1500),
+          ),
+        ]);
+        const elapsedMs = performance.now() - startedAt;
+        expect(elapsedMs).toBeLessThan(1500);
+      } finally {
+        await stop();
+      }
+    });
   },
 );

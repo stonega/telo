@@ -21,6 +21,7 @@ import type {
   ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
 import { type Deployment, Fault, requireThat } from "../domain.ts";
+import { detectProvider } from "../model-metadata/normalize.ts";
 import type { ExtensionCatalog, ExtensionHost } from "./extensions.ts";
 import {
   DEFAULT_MODEL_BASE_URL,
@@ -129,12 +130,35 @@ export function selectedModel(
         : pricing.cacheWrite * rate,
   };
   const capabilities = modelCapabilities(id, options);
+  const baseUrl = options.modelBaseUrl ?? DEFAULT_MODEL_BASE_URL;
+  const detectedProvider = URL.canParse(baseUrl)
+    ? detectProvider(baseUrl, options.providerType ?? "auto")
+    : "openai-compatible";
+  const provider =
+    detectedProvider === "newapi" ? "openai-compatible" : detectedProvider;
+  const isAnthropicModel = /^(?:anthropic\/)?claude-/i.test(id);
+  const isOpenAiCacheModel = /^(?:openai\/)?(?:gpt-(?:4o|4\.1|5)|o[134])/i.test(
+    id,
+  );
+  const supportsOpenAi24hCache =
+    detectedProvider === "openai" && /^(?:gpt-4\.1|gpt-5)/i.test(id);
+  const useAnthropicCacheControl =
+    isAnthropicModel &&
+    (detectedProvider === "openrouter" ||
+      detectedProvider === "newapi" ||
+      id.startsWith("anthropic/"));
+  const enablePromptCacheKey =
+    detectedProvider === "openai" ||
+    (isOpenAiCacheModel &&
+      (detectedProvider === "openrouter" ||
+        detectedProvider === "newapi" ||
+        detectedProvider === "openai-compatible"));
   return {
     id,
     name: options.modelMetadata?.name ?? catalog?.name ?? id,
     api: "openai-completions",
-    provider: "openai-compatible",
-    baseUrl: options.modelBaseUrl ?? DEFAULT_MODEL_BASE_URL,
+    provider,
+    baseUrl,
     reasoning:
       options.thinkingLevel !== undefined && options.thinkingLevel !== "off",
     input: options.modelMetadata?.input ?? catalog?.input ?? ["text", "image"],
@@ -151,9 +175,24 @@ export function selectedModel(
     maxTokens: capabilities.limits.maxOutputTokens,
     compat: {
       supportsDeveloperRole: false,
-      supportsReasoningEffort: true,
-      thinkingFormat: "openai",
-      maxTokensField: "max_completion_tokens",
+      ...(detectedProvider === "openai-compatible" ||
+      detectedProvider === "newapi"
+        ? {
+            supportsReasoningEffort: true,
+            thinkingFormat: "openai" as const,
+            maxTokensField: "max_completion_tokens" as const,
+          }
+        : {}),
+      ...(useAnthropicCacheControl
+        ? { cacheControlFormat: "anthropic" as const }
+        : {}),
+      ...(enablePromptCacheKey
+        ? { promptCacheKeyMode: "enabled" as const }
+        : {}),
+      supportsLongCacheRetention: supportsOpenAi24hCache,
+      sendSessionAffinityHeaders: true,
+      sessionAffinityFormat:
+        detectedProvider === "openrouter" ? "openrouter" : "openai-nosession",
     },
   };
 }
@@ -474,8 +513,21 @@ export class PiRunner implements AgentRunner {
         });
         attemptStartedAt = Date.now();
         turns++;
+        const supportsLongRetention =
+          model.api === "openai-completions" &&
+          Boolean(
+            (model as Model<"openai-completions">).compat
+              ?.supportsLongCacheRetention,
+          );
         return this.stream(model, context, {
           ...options,
+          cacheRetention:
+            options?.cacheRetention ??
+            (input.purpose
+              ? "short"
+              : supportsLongRetention
+                ? "long"
+                : "short"),
           apiKey: input.apiKey,
           maxTokens,
           maxRetryDelayMs: 0,

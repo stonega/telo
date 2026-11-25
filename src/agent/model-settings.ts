@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { currencies } from "../currency.ts";
-import type { ModelMetadata } from "../model-metadata/types.ts";
+import type { ModelMetadata, ProviderType } from "../model-metadata/types.ts";
 
 export const DEFAULT_MODEL_BASE_URL = "https://api.openai.com/v1";
 // Automatic output allowance for models missing catalog metadata.
@@ -107,6 +107,8 @@ export type ModelOptions = z.infer<typeof modelOptionsSchema> & {
   providerContext?: boolean;
   // Server-fetched metadata is pinned with run options, never accepted from forms.
   modelMetadata?: ModelMetadata;
+  // Discovered upstream provider family pinned for transport/cache compatibility.
+  providerType?: ProviderType;
 };
 export const credentialsSchema = modelOptionsSchema
   .extend({

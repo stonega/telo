@@ -10,6 +10,9 @@ const browserBaseInstructions = `Browser is a private headed browser on the VPS,
 export const browserInstructions = `${browserBaseInstructions}
 Task coordination: a status/progress question only observes saved task state. Never acquire, navigate, refill, submit or request a new approval merely to answer progress. If Browser returns observerOnly or browser_task_in_progress, another run in this conversation owns the work; explain its task/waiting metadata and let that same task continue. “Continue” is not website/action consent. Preserve the original goal, transcript and last confirmed step after any pause. An unavailable control action can also contain blockedOrigins; inspect tabs and the original page to identify the destination actually needed. Background autofill, analytics and advertising origins are not automatically required permissions. Do not reopen and refill the form or repeat an uncertain submission as recovery. Request only necessary website consent with its reason, then inspect again before a new page-bound decision. A completed click, a download link or a success banner does not prove a file was saved. For a download task, check browser_session(status) for a verified downloads entry with a nonzero size and private artifact ID before reporting completion. Downloads have a 25 MiB per-file limit and remain available through the user's private Browser page; never invent a public download URL. If no file is confirmed, report the actual step or blocker instead of completion.`;
 
+const unconfiguredBrowserInstructions =
+  "Private Browser is not configured on this server. Do not proactively call Browser tools; call browser_session only when the user explicitly asks to use the private browser.";
+
 export function browserToolDefinitions() {
   return [
     {
@@ -79,6 +82,9 @@ export function browserExtension(
   workspaceId: string,
   generation: number,
 ): BuiltinExtension {
+  const promptInstructions = service.configured
+    ? browserInstructions
+    : unconfiguredBrowserInstructions;
   return {
     id: "browser",
     version: "1",
@@ -89,7 +95,7 @@ export function browserExtension(
     tools: [...browserTools],
     hash: fingerprint({
       generation,
-      instructions: browserInstructions,
+      instructions: promptInstructions,
       version: 1,
     }),
     toolErrorCodes: [
@@ -122,7 +128,7 @@ export function browserExtension(
     factory: (input) => async (pi) => {
       const fence = await service.executionFence(workspaceId, input.runId);
       pi.on("before_agent_start", (event) => ({
-        systemPrompt: `${event.systemPrompt}\n\n${browserInstructions}`,
+        systemPrompt: `${event.systemPrompt}\n\n${promptInstructions}`,
       }));
       const definitions = browserToolDefinitions();
       for (const definition of definitions)

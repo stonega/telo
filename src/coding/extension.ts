@@ -102,16 +102,22 @@ export function codingExtension(
       const binding = workspace.runs.find(
         (r) => r.id === input.runId,
       )?.groupRepository;
-      const accessibleTargets = targets.filter(
-        (t) =>
-          (!binding || binding.repositoryId === t.repositoryId) &&
-          verifiedRepositoryAccess(
-            workspace,
-            input.actor,
-            t.repositoryId,
-            true,
-          ),
-      );
+      const accessibleTargets = targets
+        .filter(
+          (t) =>
+            (!binding || binding.repositoryId === t.repositoryId) &&
+            verifiedRepositoryAccess(
+              workspace,
+              input.actor,
+              t.repositoryId,
+              true,
+            ),
+        )
+        .sort((a, b) => a.repositoryId - b.repositoryId);
+      const accessibleTargetSummary =
+        accessibleTargets
+          .map((t) => `${t.repositoryId}:${t.repository}@${t.baseBranch}`)
+          .join(", ") || "none";
       const operate = async (action: (w: Workspace, sql: Sql) => unknown) => {
         input.signal.throwIfAborted();
         await input.guard();
@@ -181,7 +187,7 @@ export function codingExtension(
         pi.registerTool({
           name: "start_development_task",
           label: `Start continuous ${defaultEngineLabel} task`,
-          description: `Start a repository task for implementation, an explicit coding investigation, or an engineering release/prepare-release request. Enabled coding engines: ${JSON.stringify(enabledEngines)}. Pass engine="antigravity" when the user asks to use Antigravity CLI (agy) or when Antigravity CLI is the enabled coding plugin, and engine="codex" for Codex; if omitted, the sole enabled engine is selected (defaulting to codex when both are enabled). Use objective.kind=release for repository release procedures and objective.kind=investigation for read-only technical work; these objectives are available by default for selected repositories unless explicitly disabled. The coding agent reads project release instructions itself; Pi does not invent the procedure. Website browsing, sign-in and browser automation belong to the current Pi conversation using Browser tools; they do not by themselves require a separate coding task. Handle ordinary conversation, explanations, status, complaints about a failed task, and PR review with the assistant's available read tools; do not start a new coding task unless the user explicitly asks to implement, investigate, or release. An existing task in this topic does not authorize another coding turn. Use query_work_handoff to resolve an existing task before starting new work; send_development_input continues changes to that task/PR and can correct an unchanged task's repository. Relay the authenticated GitHub collaborator's ORIGINAL received message. The coding agent owns technical decisions and necessary product questions within the coding task. Do not write a technical plan or issue body. Distinguish the repository to MODIFY from repositories supplying documentation, examples, sibling projects or other reference material. Whenever the user wants to reference, mirror, port or copy from another connected repository (including one named earlier in the conversation or with minor spelling differences), pass its numeric repository ID in referenceRepositoryIds (use find_connected_repository if needed) so the application prepares a commit-pinned read-only checkout before coding starts. Do not claim pinning is unavailable or propose an unpinned fallback without checking the actual task state. Missing source/environment prerequisites are application blockers, not requests for another user confirmation. For 'add docs to product-land using https://github.com/acme/product/blob/main/docs/README.md', resolve product-land to the connected landing repository and pass acme/product's repository ID in referenceRepositoryIds. Quote the target name in targetRepository and match its repositoryId. Resolve an unambiguous abbreviation against accessible repositories; ask one plain-language target question only if it remains ambiguous. A target validation failure creates no task: correct the selection rather than retrying the same wrong ID. Source IDs must include this run's request. If github_user_connection_required is returned, use manage_telegram to start their GitHub connection in this bot's private chat when they request it. They follow the authorization link, return to confirm the account, then resend their coding request. For a group request, ask them to connect GitHub in private using ordinary language. Accessible repositories: ${JSON.stringify(accessibleTargets)}.`,
+          description: `Start a repository task for implementation, an explicit coding investigation, or an engineering release/prepare-release request. Enabled coding engines: ${JSON.stringify(enabledEngines)}. Pass engine="antigravity" when the user asks to use Antigravity CLI (agy) or when Antigravity CLI is the enabled coding plugin, and engine="codex" for Codex; if omitted, the sole enabled engine is selected (defaulting to codex when both are enabled). Use objective.kind=release for repository release procedures and objective.kind=investigation for read-only technical work; these objectives are available by default for selected repositories unless explicitly disabled. The coding agent reads project release instructions itself; Pi does not invent the procedure. Website browsing, sign-in and browser automation belong to the current Pi conversation using Browser tools; they do not by themselves require a separate coding task. Handle ordinary conversation, explanations, status, complaints about a failed task, and PR review with the assistant's available read tools; do not start a new coding task unless the user explicitly asks to implement, investigate, or release. An existing task in this topic does not authorize another coding turn. Use query_work_handoff to resolve an existing task before starting new work; send_development_input continues changes to that task/PR and can correct an unchanged task's repository. Relay the authenticated GitHub collaborator's ORIGINAL received message. The coding agent owns technical decisions and necessary product questions within the coding task. Do not write a technical plan or issue body. Distinguish the repository to MODIFY from repositories supplying documentation, examples, sibling projects or other reference material. Whenever the user wants to reference, mirror, port or copy from another connected repository (including one named earlier in the conversation or with minor spelling differences), pass its numeric repository ID in referenceRepositoryIds (use find_connected_repository if needed) so the application prepares a commit-pinned read-only checkout before coding starts. Do not claim pinning is unavailable or propose an unpinned fallback without checking the actual task state. Missing source/environment prerequisites are application blockers, not requests for another user confirmation. For 'add docs to product-land using https://github.com/acme/product/blob/main/docs/README.md', resolve product-land to the connected landing repository and pass acme/product's repository ID in referenceRepositoryIds. Quote the target name in targetRepository and match its repositoryId. Resolve an unambiguous abbreviation against accessible repositories; ask one plain-language target question only if it remains ambiguous. A target validation failure creates no task: correct the selection rather than retrying the same wrong ID. Source IDs must include this run's request. If github_user_connection_required is returned, use manage_telegram to start their GitHub connection in this bot's private chat when they request it. They follow the authorization link, return to confirm the account, then resend their coding request. For a group request, ask them to connect GitHub in private using ordinary language. Accessible repositories: ${accessibleTargetSummary}.`,
           parameters: Type.Object({
             engine: Type.Optional(
               Type.Union([Type.Literal("codex"), Type.Literal("antigravity")]),

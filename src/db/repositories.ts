@@ -710,15 +710,38 @@ export class Store {
       (d) =>
         d.state === "pending" && !lockedPrevious?.pendingDeliveryIds.has(d.id),
     );
+    const insertedRuns: string[] = [];
+    const insertedDeliveries: string[] = [];
     for (const [kind, records] of [
       ["run", newlyQueuedRuns],
       ["delivery", newlyPendingDeliveries],
     ] as const) {
-      for (const record of records)
-        await sql.query(
+      for (const record of records) {
+        const res = await sql.query(
           "INSERT INTO outbox(id,kind,workspace_id,target_id) VALUES($1,$2,$3,$4) ON CONFLICT(kind,workspace_id,target_id) DO NOTHING",
           [randomUUID(), kind, workspace.id, record.id],
         );
+        if ((res.rowCount ?? 0) > 0) {
+          if (kind === "run") insertedRuns.push(record.id);
+          else insertedDeliveries.push(record.id);
+        }
+      }
+    }
+    if (insertedRuns.length > 0 || insertedDeliveries.length > 0) {
+      const fullPayload = JSON.stringify({
+        w: workspace.id,
+        r: insertedRuns.length > 0 ? 1 : 0,
+        d: insertedDeliveries.slice(0, 8),
+      });
+      const payload =
+        Buffer.byteLength(fullPayload, "utf8") <= 7500
+          ? fullPayload
+          : JSON.stringify({
+              w: workspace.id,
+              r: insertedRuns.length > 0 ? 1 : 0,
+              d: [],
+            });
+      await sql.query("SELECT pg_notify('telo_outbox', $1)", [payload]);
     }
     snapshots.set(
       workspace,
