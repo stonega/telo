@@ -197,11 +197,12 @@ test.describe
       );
       await page.unroute(registrationRoute);
       await page.goto("/admin");
+      const nav = page.getByRole("navigation");
       await expect(
-        page.getByRole("link", { name: "Threads", exact: true }),
+        nav.getByRole("link", { name: "Threads", exact: true }),
       ).toBeVisible();
       await expect(
-        page.getByRole("link", { name: "Workflows", exact: true }),
+        nav.getByRole("link", { name: "Workflows", exact: true }),
       ).toBeVisible();
       await page.getByRole("link", { name: "0 threads. View details" }).click();
       await expect(
@@ -211,7 +212,7 @@ test.describe
       await expect(
         page.getByRole("button", { name: "New request" }),
       ).toHaveCount(0);
-      await page.getByRole("link", { name: "Workflows", exact: true }).click();
+      await nav.getByRole("link", { name: "Workflows", exact: true }).click();
       await expect(
         page.getByRole("heading", { name: "Scheduled workflows" }),
       ).toBeVisible();
@@ -777,7 +778,10 @@ test.describe
         decide(w, "101", p.approval.id, true);
       });
       await pool.end();
-      await page.getByRole("link", { name: "Workflows", exact: true }).click();
+      await page
+        .getByRole("navigation")
+        .getByRole("link", { name: "Workflows", exact: true })
+        .click();
       const workflow = page.locator("section").filter({
         has: page.getByRole("heading", {
           name: "Browser weekly recap",
