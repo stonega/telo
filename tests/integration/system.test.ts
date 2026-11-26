@@ -2829,7 +2829,7 @@ suite("PostgreSQL integration (isolated database)", () => {
       runId: r.id,
       state: "pending",
     });
-    expect(intent?.replyTo).toBeUndefined();
+    expect(intent?.replyTo).toBe(42);
     expect(intent?.text).toContain("Investigation complete.");
     expect(intent?.text).not.toContain(r.id);
     const before = calls.length;
